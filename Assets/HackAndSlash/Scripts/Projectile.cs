@@ -15,6 +15,7 @@ namespace HackAndSlash
         Light glow;
         TrailRenderer trail;
         MeshRenderer orb;
+        CounterIndicator indicator;
 
         public static Projectile Spawn(Vector3 pos, Vector3 dir, float dmg, GameManager gm, Color color)
         {
@@ -45,6 +46,7 @@ namespace HackAndSlash
             p.trail.shadowCastingMode = ShadowCastingMode.Off;
             p.SetTrailColor(color);
 
+            p.indicator = CounterIndicator.Create(go.transform, 0.55f, 0.42f);
             gm.projectiles.Add(p);
             return p;
         }
@@ -68,6 +70,7 @@ namespace HackAndSlash
                 {
                     Vector3 to = pl.Chest - transform.position;
                     vel = Vector3.RotateTowards(vel, to.normalized * speed, 1.0f * dt, 0f);
+                    if (indicator) indicator.Show(to.magnitude < 5.5f, false);
                     if (to.magnitude < 0.75f && pl.TakeDamage(damage, transform.position - vel.normalized, 5f)) { Pop(); return; }
                 }
             }
@@ -88,7 +91,7 @@ namespace HackAndSlash
                     if ((e.Chest - transform.position).sqrMagnitude < r * r)
                     {
                         Vector3 d = vel; d.y = 0f;
-                        e.TakeHit(damage, d.sqrMagnitude > 0.01f ? d.normalized : Vector3.forward, 9f, true, true);
+                        e.TakeHit(new HitInfo(damage, d.sqrMagnitude > 0.01f ? d.normalized : Vector3.forward, 9f, HitKind.Projectile, true), transform.position - vel.normalized);
                         gm.HitStop(0.06f);
                         gm.cameraRig.Shake(0.35f);
                         Pop();
@@ -111,6 +114,7 @@ namespace HackAndSlash
             color = new Color(0.3f, 0.9f, 1f);
             vel = (dir.sqrMagnitude > 0.001f ? dir.normalized : Vector3.forward) * (speed * 2.1f);
             homingTarget = null;
+            if (indicator) indicator.Show(false, false);
             orb.sharedMaterial = FX.Emissive(color, 5f);
             glow.color = color;
             SetTrailColor(color);

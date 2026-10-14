@@ -7,8 +7,12 @@ namespace HackAndSlash
     /// <summary>Runtime-built uGUI/TMP HUD: health & rage bars, combo meter, wave banners, boss bar, damage vignette, game over.</summary>
     public class HUD : MonoBehaviour
     {
-        RectTransform hpFill, hpChip, rageFill, bossFill, bossChip, comboTimer;
+        RectTransform hpFill, hpChip, rageFill, bossFill, bossChip, comboTimer, barTop, barBottom;
         Image rageImg, vignette, flash, goBg;
+        Image[] pips;
+        TextMeshProUGUI specialText, tipText;
+        CanvasGroup tipGroup;
+        float letterboxT, letterbox, tipT = 99f;
         TextMeshProUGUI hpText, rageText, waveText, enemiesText, scoreText, comboNum, comboLabel, comboMult;
         TextMeshProUGUI bannerTitle, bannerSub, popupText, hintText, autoText, bossName, goTitle, goStats, goPrompt;
         CanvasGroup bannerGroup, popupGroup, comboGroup, bossGroup, goGroup, hintGroup;
@@ -28,7 +32,8 @@ namespace HackAndSlash
             hpChipV = 1f; bossChipV = 1f; shownScore = 0f; hurt = 0f; flashA = 0f; hintT = 0f;
             comboGroup.alpha = 0f;
             popupT = 99f;
-            Banner("VOID ARENA", "HACK  ·  SLASH  ·  SURVIVE", new Color(0.55f, 0.85f, 1f));
+            letterbox = 0f; letterboxT = 0f; tipT = 99f;
+            Banner("VOID ARENA", "STRIKE  ·  COUNTER  ·  TAKE THEM APART", new Color(0.55f, 0.85f, 1f));
         }
 
         public void Banner(string title, string sub, Color color)
@@ -47,6 +52,16 @@ namespace HackAndSlash
         }
 
         public void OnComboHit(int combo) => comboPunch = 1f;
+
+        /// <summary>Cinematic bars for takedowns and final blows.</summary>
+        public void Letterbox(float seconds) => letterboxT = Mathf.Max(letterboxT, seconds);
+
+        /// <summary>Contextual coaching line ("RED ATTACKS CAN'T BE COUNTERED", ...).</summary>
+        public void Hint(string text)
+        {
+            tipText.text = text;
+            tipT = 0f;
+        }
         public void OnPlayerHurt() => hurt = 1f;
         public void OnHeal() { }
         public void Flash(float a) => flashA = Mathf.Max(flashA, a);
@@ -117,6 +132,28 @@ namespace HackAndSlash
             }
             else comboGroup.alpha = Mathf.MoveTowards(comboGroup.alpha, 0f, udt * 3f);
             comboPunch = Mathf.MoveTowards(comboPunch, 0f, udt * 6f);
+
+            // special-combo meter (takedown)
+            int sp = gm.Special;
+            for (int i = 0; i < pips.Length; i++)
+            {
+                bool on = i < sp;
+                Color c = gm.SpecialReady ? Color.Lerp(new Color(1f, 0.75f, 0.2f), Color.white, 0.5f + 0.5f * Mathf.Sin(time * 10f)) : new Color(1f, 0.82f, 0.35f);
+                pips[i].color = on ? c : new Color(1f, 1f, 1f, 0.12f);
+            }
+            specialText.text = gm.SpecialReady ? "<b>F</b>  TAKEDOWN READY" : "";
+            specialText.alpha = 0.7f + 0.3f * Mathf.Sin(time * 8f);
+
+            // letterbox
+            letterboxT -= udt;
+            letterbox = Mathf.MoveTowards(letterbox, letterboxT > 0f ? 1f : 0f, udt * (letterboxT > 0f ? 6f : 3f));
+            float bh = 118f * Mathf.SmoothStep(0f, 1f, letterbox);
+            barTop.sizeDelta = new Vector2(0f, bh);
+            barBottom.sizeDelta = new Vector2(0f, bh);
+
+            // coaching tip
+            tipT += udt;
+            tipGroup.alpha = Mathf.Clamp01(tipT / 0.15f) * (1f - Mathf.Clamp01((tipT - 2.6f) / 0.6f));
             comboNum.rectTransform.localScale = Vector3.one * (1f + comboPunch * comboPunch * 0.45f);
 
             // banner
@@ -240,6 +277,28 @@ namespace HackAndSlash
             var ctBg = Img("ComboTimer", comboRoot, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(0f, -210f), new Vector2(240f, 6f), Panel);
             comboTimer = Fill(ctBg.transform, new Color(1f, 1f, 1f, 0.85f));
 
+            // special-combo pips sit under the combo counter and stay visible
+            pips = new Image[GameManager.SpecialCost];
+            for (int i = 0; i < pips.Length; i++)
+                pips[i] = Img("Pip" + i, root, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-60f - (pips.Length - 1 - i) * 32f, -170f), new Vector2(26f, 8f), new Color(1f, 1f, 1f, 0.12f));
+            specialText = Label("Special", root, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-60f, -200f), new Vector2(420f, 34f), 24f, new Color(1f, 0.85f, 0.4f), TextAlignmentOptions.Right);
+            specialText.characterSpacing = 6f;
+
+            // cinematic letterbox
+            barTop = Img("LetterboxTop", root, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, 0f), Color.black).rectTransform;
+            barTop.anchorMin = new Vector2(0f, 1f); barTop.anchorMax = new Vector2(1f, 1f);
+            barBottom = Img("LetterboxBottom", root, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), Vector2.zero, new Vector2(0f, 0f), Color.black).rectTransform;
+            barBottom.anchorMin = new Vector2(0f, 0f); barBottom.anchorMax = new Vector2(1f, 0f);
+
+            // coaching tip
+            var tipRoot = new GameObject("Tip", typeof(RectTransform)).GetComponent<RectTransform>();
+            tipRoot.SetParent(root, false);
+            Anchor(tipRoot, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 150f), new Vector2(1400f, 44f));
+            tipGroup = tipRoot.gameObject.AddComponent<CanvasGroup>();
+            tipGroup.alpha = 0f;
+            tipText = Label("TipText", tipRoot, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1400f, 44f), 28f, new Color(0.75f, 0.92f, 1f), TextAlignmentOptions.Center);
+            tipText.characterSpacing = 6f;
+
             // center: banner & popup
             var bannerRoot = new GameObject("Banner", typeof(RectTransform)).GetComponent<RectTransform>();
             bannerRoot.SetParent(root, false);
@@ -263,7 +322,7 @@ namespace HackAndSlash
             Anchor(hintRoot, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 26f), new Vector2(1800f, 40f));
             hintGroup = hintRoot.gameObject.AddComponent<CanvasGroup>();
             hintText = Label("HintText", hintRoot, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1800f, 40f), 22f, Color.white, TextAlignmentOptions.Center);
-            hintText.text = "<b>WASD</b> Move     <b>LMB / J</b> Combo     <b>RMB / K</b> Spin     <b>SPACE</b> Dash     <b>Q</b> Void Nova     <b>P</b> Autopilot";
+            hintText.text = "<b>LMB</b> Strike   <b>RMB</b> Counter   <b>SPACE</b> Evade / Vault   <b>E</b> Stun   <b>F</b> Takedown   <b>Q</b> Nova   <b>MOUSE</b> Camera   <b>V</b> View   <b>P</b> Autopilot";
             autoText = Label("Autopilot", root, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(40f, 70f), new Vector2(600f, 36f), 26f, new Color(0.4f, 0.95f, 1f), TextAlignmentOptions.Left);
             autoText.text = "AUTOPILOT  [P]";
             autoText.enabled = false;

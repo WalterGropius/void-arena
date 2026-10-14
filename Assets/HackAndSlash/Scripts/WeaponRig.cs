@@ -17,6 +17,10 @@ namespace HackAndSlash
         [Range(0f, 1f)] public float leftHandWeight;
         [Range(0f, 1f)] public float lookWeight;
         public Vector3 lookTargetWorld;
+        /// <summary>Optional off-hand IK goal (e.g. a riot shield handle) used instead of the two-handed grip.</summary>
+        public Transform leftHandTarget;
+        /// <summary>Procedural upper-body twist (yaw, degrees) and forward bend (pitch, degrees) applied in the IK pass.</summary>
+        public float torsoTwist, torsoBend;
 
         public WeaponTrail Trail { get; private set; }
         public Vector3 GripWorld => weapon.position;
@@ -247,16 +251,57 @@ namespace HackAndSlash
             return go.transform;
         }
 
+        static GameObject Plate(Transform parent, Vector3 pos, Vector3 size, float radius, Material mat, Vector3 euler = default, float taper = 1f, bool shadows = true)
+        {
+            var go = new GameObject("Plate");
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            go.transform.localRotation = Quaternion.Euler(euler);
+            go.AddComponent<MeshFilter>().sharedMesh = Application.isPlaying ? MeshKit.RoundedBox(size, radius, 2, taper) : MeshKit.BuildRoundedBox(size, radius, 2, taper, 0.5f);
+            var r = go.AddComponent<MeshRenderer>();
+            r.sharedMaterial = mat;
+            r.shadowCastingMode = shadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
+            return go;
+        }
+
+        /// <summary>The Void Blade: chrome spine, glowing twin edges, bevelled guard and a wrapped grip.</summary>
         public static Transform Sword(Transform parent, Material metal, Material glow)
         {
             var root = NewRoot("VoidBlade", parent);
-            Part(PrimitiveType.Cylinder, root, new Vector3(0f, 0f, -0.03f), new Vector3(0.055f, 0.12f, 0.055f), metal, new Vector3(90f, 0f, 0f));
-            Part(PrimitiveType.Sphere, root, new Vector3(0f, 0f, -0.18f), Vector3.one * 0.09f, glow, default, false);
-            Part(PrimitiveType.Cube, root, new Vector3(0f, 0f, 0.12f), new Vector3(0.36f, 0.05f, 0.07f), metal);
-            Part(PrimitiveType.Cube, root, new Vector3(0f, 0f, 0.125f), new Vector3(0.11f, 0.065f, 0.1f), glow, default, false);
-            Part(PrimitiveType.Cube, root, new Vector3(0f, 0f, 0.68f), new Vector3(0.035f, 0.032f, 1.0f), metal);
-            Part(PrimitiveType.Cube, root, new Vector3(0f, 0f, 0.71f), new Vector3(0.14f, 0.018f, 1.1f), glow, default, false);
-            Part(PrimitiveType.Cube, root, new Vector3(0f, 0f, 1.255f), new Vector3(0.1f, 0.018f, 0.1f), glow, new Vector3(0f, 45f, 0f), false);
+            Plate(root, new Vector3(0f, 0f, -0.04f), new Vector3(0.045f, 0.045f, 0.26f), 0.018f, metal);
+            Plate(root, new Vector3(0f, 0f, -0.19f), new Vector3(0.07f, 0.07f, 0.06f), 0.03f, glow, default, 1f, false);
+            Plate(root, new Vector3(0f, 0f, 0.11f), new Vector3(0.34f, 0.05f, 0.07f), 0.022f, metal);
+            Plate(root, new Vector3(0f, 0f, 0.115f), new Vector3(0.12f, 0.062f, 0.09f), 0.02f, glow, default, 1f, false);
+            Plate(root, new Vector3(0f, 0f, 0.68f), new Vector3(0.05f, 0.02f, 1.02f), 0.008f, metal, default, 0.55f);
+            Plate(root, new Vector3(0.034f, 0f, 0.69f), new Vector3(0.018f, 0.008f, 1.0f), 0.003f, glow, default, 0.4f, false);
+            Plate(root, new Vector3(-0.034f, 0f, 0.69f), new Vector3(0.018f, 0.008f, 1.0f), 0.003f, glow, default, 0.4f, false);
+            Plate(root, new Vector3(0f, 0f, 1.22f), new Vector3(0.05f, 0.012f, 0.09f), 0.004f, glow, new Vector3(0f, 45f, 0f), 1f, false);
+            return root;
+        }
+
+        /// <summary>Riot police stun baton.</summary>
+        public static Transform Baton(Transform parent, Material metal, Material glow)
+        {
+            var root = NewRoot("StunBaton", parent);
+            Plate(root, new Vector3(0f, 0f, 0.0f), new Vector3(0.05f, 0.05f, 0.16f), 0.02f, metal);
+            Plate(root, new Vector3(0f, 0f, 0.36f), new Vector3(0.04f, 0.04f, 0.46f), 0.018f, metal);
+            Plate(root, new Vector3(0f, 0f, 0.6f), new Vector3(0.05f, 0.05f, 0.05f), 0.024f, glow, default, 1f, false);
+            return root;
+        }
+
+        /// <summary>Energy riot shield. Contains a "Handle" child used as the off-hand IK goal.</summary>
+        public static Transform RiotShield(Transform parent, Material body, Material glow)
+        {
+            var root = NewRoot("RiotShield", parent);
+            Plate(root, new Vector3(0f, 0f, 0f), new Vector3(0.66f, 1.0f, 0.05f), 0.02f, body);
+            Plate(root, new Vector3(0f, 0.45f, 0.028f), new Vector3(0.6f, 0.03f, 0.012f), 0.005f, glow, default, 1f, false);
+            Plate(root, new Vector3(0f, -0.45f, 0.028f), new Vector3(0.6f, 0.03f, 0.012f), 0.005f, glow, default, 1f, false);
+            Plate(root, new Vector3(0.31f, 0f, 0.028f), new Vector3(0.03f, 0.86f, 0.012f), 0.005f, glow, default, 1f, false);
+            Plate(root, new Vector3(-0.31f, 0f, 0.028f), new Vector3(0.03f, 0.86f, 0.012f), 0.005f, glow, default, 1f, false);
+            Plate(root, new Vector3(0f, 0.25f, 0.03f), new Vector3(0.36f, 0.12f, 0.012f), 0.01f, glow, default, 1f, false);
+            var handle = new GameObject("Handle").transform;
+            handle.SetParent(root, false);
+            handle.localPosition = new Vector3(0.05f, -0.05f, -0.09f);
             return root;
         }
 
