@@ -44,9 +44,15 @@ namespace HackAndSlash
     {
         class Piece
         {
-            public Transform t;
+            public Transform t, parent;
             public HumanBodyBones bone;
             public bool detachable, detached;
+            // rebuild data, so a respawning hero gets its plates back
+            public string name;
+            public Mesh mesh;
+            public Material mat;
+            public Vector3 localPos, localScale;
+            public Quaternion localRot;
         }
 
         static readonly int EmissionId = Shader.PropertyToID("_EmissionColor");
@@ -116,9 +122,10 @@ namespace HackAndSlash
 
         void OnDestroy()
         {
-            if (paint) Destroy(paint);
+            // detached plates (debris lives up to ~10 s) keep rendering with these after the robot is gone
+            if (paint) Destroy(paint, 10f);
             if (suit) Destroy(suit);
-            if (glow) Destroy(glow);
+            if (glow) Destroy(glow, 10f);
         }
 
         Transform B(HumanBodyBones b) => anim ? anim.GetBoneTransform(b) : null;
@@ -318,7 +325,11 @@ namespace HackAndSlash
             mr.sharedMaterial = mat;
             mr.shadowCastingMode = ShadowCastingMode.On;
             go.transform.SetParent(parent, true);
-            pieces.Add(new Piece { t = go.transform, bone = bone, detachable = detachable });
+            pieces.Add(new Piece
+            {
+                t = go.transform, parent = parent, bone = bone, detachable = detachable, name = name, mesh = mesh, mat = mat,
+                localPos = go.transform.localPosition, localRot = go.transform.localRotation, localScale = go.transform.localScale
+            });
             Renderers.Add(mr);
         }
 
@@ -333,6 +344,37 @@ namespace HackAndSlash
                 var t = B(kv.Key);
                 if (t) t.localScale = kv.Value;
             }
+        }
+
+        /// <summary>Re-bolts every plate that came off and restores the bone scales (used when the hero respawns).</summary>
+        public void Restore()
+        {
+            foreach (var kv in boneScale)
+            {
+                var b = B(kv.Key);
+                if (b) b.localScale = Vector3.one;
+            }
+            boneScale.Clear();
+            if (B(HumanBodyBones.Head)) boneScale[HumanBodyBones.Head] = Vector3.one * 0.62f;
+            ApplyBoneScales();
+            foreach (var p in pieces)
+            {
+                if (!p.detached || !p.parent) continue;
+                var go = new GameObject(p.name);
+                go.layer = gameObject.layer;
+                go.transform.SetParent(p.parent, false);
+                go.transform.localPosition = p.localPos;
+                go.transform.localRotation = p.localRot;
+                go.transform.localScale = p.localScale;
+                go.AddComponent<MeshFilter>().sharedMesh = p.mesh;
+                var mr = go.AddComponent<MeshRenderer>();
+                mr.sharedMaterial = p.mat;
+                mr.shadowCastingMode = ShadowCastingMode.On;
+                p.t = go.transform;
+                p.detached = false;
+                Renderers.Add(mr);
+            }
+            SetEmission(Color.black, 1f);
         }
 
         /// <summary>Hit flash on the paint/suit and the intensity of the emissive accents.</summary>

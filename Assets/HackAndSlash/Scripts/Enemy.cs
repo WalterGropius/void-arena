@@ -217,7 +217,7 @@ namespace HackAndSlash
             if (bar) Destroy(bar.gameObject);
             if (telegraph) Destroy(telegraph.gameObject);
             if (indicator) Destroy(indicator.gameObject);
-            if (shieldGlow) Destroy(shieldGlow);
+            if (shieldGlow) Destroy(shieldGlow, 10f); // the dropped shield keeps using it while it lies on the roof
             if (gm)
             {
                 gm.enemies.Remove(this);
@@ -261,6 +261,7 @@ namespace HackAndSlash
                     break;
                 case State.Recover:
                     rig.SetTarget(RestGrip(), RestDir(), 7f);
+                    model.localRotation = Quaternion.Slerp(model.localRotation, Quaternion.identity, 1f - Mathf.Exp(-12f * dt));
                     if (stateTime >= stateDur) Enter(State.Circle);
                     break;
                 case State.Stagger:
@@ -343,7 +344,7 @@ namespace HackAndSlash
             flash = Mathf.MoveTowards(flash, 0f, dt * 7f);
             if (state == State.Windup || (state == State.Attack && !hitDone)) glowLevel = 1.2f + 1.6f * Mathf.Clamp01(stateTime / Mathf.Max(0.01f, stateDur));
             if (unblockable && (state == State.Windup || state == State.Attack)) armor.SetGlowColor(new Color(4f, 0.25f, 0.1f));
-            else armor.SetGlowColor(armor.Palette.glow);
+            else armor.SetGlowColor(enraged ? new Color(4f, 0.3f, 0.05f) : armor.Palette.glow);
             armor.SetEmission(Color.white * (flash * 2.2f), glowLevel);
             if (indicator) indicator.Show(CanBeCountered || UnblockableIncoming, unblockable);
         }
@@ -818,10 +819,11 @@ namespace HackAndSlash
             return to.sqrMagnitude > 0.01f && Vector3.Angle(facing, to) < 75f;
         }
 
-        public void OnCountered()
+        public void OnCountered(float hold = 1.1f)
         {
             if (!Targetable) return;
             Enter(State.Countered);
+            stateDur = hold;
         }
 
         /// <summary>Arc stun (Arkham's cape stun). Returns false if the robot shrugged it off.</summary>
@@ -862,10 +864,10 @@ namespace HackAndSlash
         public void Knockdown(Vector3 dir)
         {
             if (state == State.Dead) return;
+            if (state == State.Downed) { stateTime = Mathf.Min(stateTime, 0.6f); return; } // keep the body where it lies
             Vector3 d = new Vector3(dir.x, 0f, dir.z);
             if (d.sqrMagnitude > 1e-4f) facing = -d.normalized;
             transform.rotation = Quaternion.LookRotation(facing);
-            if (IsDowned) { stateTime = Mathf.Min(stateTime, 0.6f); return; }
             Enter(State.Downed);
         }
 
@@ -946,6 +948,7 @@ namespace HackAndSlash
             if (state == State.Dead) return;
             if (type == EnemyType.Boss)
             {
+                if (state == State.Executed) Enter(State.Circle); // leave the lock so the takedown stun can apply
                 h.kind = HitKind.Takedown;
                 h.damage = maxHealth * 0.2f;
                 TakeHit(h, transform.position - h.dir);

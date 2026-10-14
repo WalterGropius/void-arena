@@ -148,6 +148,7 @@ namespace HackAndSlash
             rig.lookWeight = 0f;
             rig.torsoTwist = rig.torsoBend = 0f;
             rig.Snap(RestGrip(0f), RestDir());
+            if (armor) armor.Restore();
         }
 
         public void Heal(float amount)
@@ -209,7 +210,7 @@ namespace HackAndSlash
             else
             {
                 vy = cc.isGrounded ? -3f : vy - 30f * dt;
-                if (state != State.Dead && cc.enabled) cc.Move((planar + knock) * dt + Vector3.up * (vy * dt));
+                if (cc.enabled) cc.Move((state == State.Dead ? Vector3.zero : planar + knock) * dt + Vector3.up * (vy * dt));
             }
             Vector3 clamped = gm.ClampToArena(transform.position, 0.4f);
             if ((clamped - transform.position).sqrMagnitude > 1e-6f) Place(clamped);
@@ -237,7 +238,7 @@ namespace HackAndSlash
             rig.torsoTwist = Mathf.MoveTowards(rig.torsoTwist, 0f, dt * 160f);
             rig.torsoBend = Mathf.MoveTowards(rig.torsoBend, 0f, dt * 80f);
             rig.Tick(dt);
-            UpdateBodyGlow(dt);
+            if (state != State.Dead) UpdateBodyGlow(dt);
         }
 
         // ------------------------------------------------------------------ input
@@ -432,6 +433,12 @@ namespace HackAndSlash
                 counterBuf = 0f;
                 if (StartCounter()) return Vector3.zero;
             }
+            // land the blow before anything can cancel or chain out of the swing
+            if (!impactDone && t >= impactTime)
+            {
+                impactDone = true;
+                ResolveStrike(def);
+            }
             if (t >= impactTime)
             {
                 if (TryStartAction(false)) return Vector3.zero;
@@ -484,11 +491,6 @@ namespace HackAndSlash
             {
                 whooshDone = true;
                 Sfx.Play(strikeKind == 2 || strikeKind == 4 || strikeKind == 5 ? Sfx.I.swingHeavy : Sfx.I.swing, 0.65f, strikeKind == 1 ? 1.12f : 1f * Mathf.Min(1.3f, speedMul));
-            }
-            if (!impactDone && t >= impactTime)
-            {
-                impactDone = true;
-                ResolveStrike(def);
             }
             return vel;
         }
@@ -719,12 +721,13 @@ namespace HackAndSlash
 
             counterQueue.Sort((a, b) => a.TimeToImpact.CompareTo(b.TimeToImpact));
             if (counterQueue.Count > 4) counterQueue.RemoveRange(4, counterQueue.Count - 4);
-            foreach (var e in counterQueue) e.OnCountered();
+            // later robots in a multi-counter stay frozen until their blow arrives
+            for (int i = 0; i < counterQueue.Count; i++) counterQueue[i].OnCountered(1.1f + 0.45f * i);
             state = State.Counter;
             stateTime = 0f;
             counterIndex = 0;
-            BeginCounterStep();
             int n = counterQueue.Count;
+            BeginCounterStep();
             invuln = 0.35f + n * 0.3f;
             if (n >= 2)
             {
@@ -740,8 +743,24 @@ namespace HackAndSlash
             return true;
         }
 
+        /// <summary>Advances past robots that died mid-sequence (e.g. to a reflected bolt). Returns false when none are left.</summary>
+        bool SkipDeadCounterTargets()
+        {
+            while (counterIndex < counterQueue.Count && (counterQueue[counterIndex] == null || counterQueue[counterIndex].IsDead)) counterIndex++;
+            return counterIndex < counterQueue.Count;
+        }
+
+        void EndCounter()
+        {
+            rig.SetTrail(false);
+            counterQueue.Clear();
+            state = State.Move;
+            invuln = Mathf.Max(invuln, 0.2f);
+        }
+
         void BeginCounterStep()
         {
+            if (!SkipDeadCounterTargets()) { EndCounter(); return; }
             counterStepStart = stateTime;
             counterParried = counterHit = false;
             strikeStart = transform.position;
@@ -760,6 +779,7 @@ namespace HackAndSlash
                 if (stateTime > 0.22f) state = State.Move;
                 return;
             }
+            if (counterIndex >= counterQueue.Count) { EndCounter(); return; }
             var e = counterQueue[counterIndex];
             float t = stateTime - counterStepStart;
             bool valid = e != null && !e.IsDead;
@@ -777,7 +797,12 @@ namespace HackAndSlash
                 goal.y = 0f;
                 Place(Vector3.Lerp(strikeStart, goal, u * u * (3f - 2f * u)));
                 kinematic = true;
-                if (body && Random.value < 0.5f) FX.AfterImage(body, new Color(0.25f, 0.8f, 2.2f, 0.45f), 0.2f, armor ? armor.Renderers : null);
+                afterImageTimer -= Time.deltaTime;
+                if (body && afterImageTimer <= 0f)
+                {
+                    afterImageTimer = 0.03f;
+                    FX.AfterImage(body, new Color(0.25f, 0.8f, 2.2f, 0.45f), 0.2f, armor ? armor.Renderers : null);
+                }
                 rig.SetTarget(WeaponRig.HGrip(30f, 1.5f), WeaponRig.HDir(30f, 0.8f), 30f);
                 return;
             }
@@ -814,20 +839,18 @@ namespace HackAndSlash
             {
                 counterHit = true;
                 Sfx.Play(Sfx.I.swingHeavy, 0.6f, 1.15f);
-                if (valid) HitEnemy(e, 22f, HitKind.Counter, 9f, 0.45f, 0.08f);
-                AddRage(6f);
+                if (valid)
+                {
+                    HitEnemy(e, 22f, HitKind.Counter, 9f, 0.45f, 0.08f);
+                    AddRage(6f);
+                }
             }
             if (tp >= 0.26f)
             {
                 rig.SetTrail(false);
                 counterIndex++;
                 if (counterIndex < counterQueue.Count) BeginCounterStep();
-                else
-                {
-                    counterQueue.Clear();
-                    state = State.Move;
-                    invuln = Mathf.Max(invuln, 0.2f);
-                }
+                else EndCounter();
             }
         }
 
@@ -1047,7 +1070,12 @@ namespace HackAndSlash
                 goal.y = 0f;
                 Place(Vector3.Lerp(strikeStart, goal, u * u * (3f - 2f * u)));
                 kinematic = true;
-                if (body && Random.value < 0.6f) FX.AfterImage(body, new Color(1f, 0.85f, 0.35f, 0.4f), 0.25f, armor ? armor.Renderers : null);
+                afterImageTimer -= Time.deltaTime;
+                if (body && afterImageTimer <= 0f)
+                {
+                    afterImageTimer = 0.03f;
+                    FX.AfterImage(body, new Color(1f, 0.85f, 0.35f, 0.4f), 0.25f, armor ? armor.Renderers : null);
+                }
                 rig.SetTarget(WeaponRig.HGrip(115f, 1.35f), WeaponRig.HDir(115f, 0.2f), 30f);
                 return;
             }
@@ -1060,18 +1088,6 @@ namespace HackAndSlash
                 rig.Snap(WeaponRig.HGrip(ang, Mathf.Lerp(0.9f, 1.6f, u)), WeaponRig.HDir(ang, Mathf.Lerp(-0.3f, 0.8f, u)));
                 rig.SetTrail(true);
                 rig.torsoTwist = Mathf.Lerp(30f, -30f, u);
-                if (execStep == 0 && u >= 0.7f)
-                {
-                    execStep = 1;
-                    if (valid)
-                    {
-                        FX.Sparks(e.Chest, -attackDir, true, true);
-                        if (e.armor) e.armor.Chip(attackDir, 6f);
-                        Sfx.Hit(true, true, false);
-                        gm.HitStop(0.05f);
-                        gm.cameraRig.Shake(0.35f);
-                    }
-                }
             }
             else if (tt < 0.42f)
             {
@@ -1081,26 +1097,39 @@ namespace HackAndSlash
                 transform.rotation = Quaternion.LookRotation(attackDir) * Quaternion.Euler(0f, total, 0f);
                 rig.Snap(WeaponRig.HGrip(80f, 1.55f, 0.6f), WeaponRig.HDir(80f, 0.05f));
                 rig.SetTrail(true);
-                if (execStep == 1 && u >= 0.85f)
-                {
-                    execStep = 2;
-                    if (valid)
-                    {
-                        e.Execute(new HitInfo(60f, attackDir, 8f, HitKind.Takedown, true));
-                        FX.Clash(e.Head, attackDir, new Color(1f, 0.8f, 0.3f));
-                        gm.cameraRig.Shake(0.7f);
-                        gm.Pulse(0.7f);
-                        gm.Rumble(0.8f, 1f, 0.2f);
-                        Sfx.Play(Sfx.I.takedown, 0.95f, 1f, 0.05f);
-                        AddRage(14f);
-                    }
-                }
             }
             else
             {
                 transform.rotation = Quaternion.LookRotation(attackDir);
                 rig.SetTrail(false);
                 rig.SetTarget(WeaponRig.HGrip(-60f, 1.1f), WeaponRig.HDir(-60f, -0.4f), 10f);
+            }
+            // hit triggers live outside the pose windows so a long frame can't skip them
+            if (execStep == 0 && tt >= 0.07f)
+            {
+                execStep = 1;
+                if (valid)
+                {
+                    FX.Sparks(e.Chest, -attackDir, true, true);
+                    if (e.armor) e.armor.Chip(attackDir, 6f);
+                    Sfx.Hit(true, true, false);
+                    gm.HitStop(0.05f);
+                    gm.cameraRig.Shake(0.35f);
+                }
+            }
+            if (execStep == 1 && tt >= 0.33f)
+            {
+                execStep = 2;
+                if (valid)
+                {
+                    e.Execute(new HitInfo(60f, attackDir, 8f, HitKind.Takedown, true));
+                    FX.Clash(e.Head, attackDir, new Color(1f, 0.8f, 0.3f));
+                    gm.cameraRig.Shake(0.7f);
+                    gm.Pulse(0.7f);
+                    gm.Rumble(0.8f, 1f, 0.2f);
+                    Sfx.Play(Sfx.I.takedown, 0.95f, 1f, 0.05f);
+                    AddRage(14f);
+                }
             }
             if (tt >= 0.62f)
             {
