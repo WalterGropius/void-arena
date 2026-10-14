@@ -12,7 +12,7 @@ namespace HackAndSlash
     public static class FX
     {
         static GameManager gm;
-        static Material glow, flat, dmgTextMat;
+        static Material glow, flat, dmgTextMat, fallbackLit, spider;
         static Mesh ringMesh, thinRingMesh, discMesh;
         static MaterialPropertyBlock mpb;
         static readonly Dictionary<string, Material> matCache = new Dictionary<string, Material>();
@@ -44,6 +44,17 @@ namespace HackAndSlash
 
         public static Material FlatMat => flat;
         public static Material GlowMat => glow;
+        public static Material SpiderMat => spider ? spider : flat;
+
+        /// <summary>URP Lit used when a template material is missing (keeps runtime-built content from turning magenta).</summary>
+        public static Material FallbackLit
+        {
+            get
+            {
+                if (!fallbackLit) fallbackLit = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                return fallbackLit;
+            }
+        }
         public static Mesh RingMesh => ringMesh;
         public static Mesh ThinRingMesh => thinRingMesh;
         public static Mesh DiscMesh => discMesh;
@@ -55,6 +66,7 @@ namespace HackAndSlash
             var sprite = Shader.Find("Sprites/Default");
             glow = g.glowMaterial ? g.glowMaterial : new Material(sprite);
             flat = g.trailMaterial ? g.trailMaterial : new Material(sprite);
+            spider = g.spiderSenseMaterial;
             ringMesh = BuildRing(0.78f, 1f, 72);
             thinRingMesh = BuildRing(0.93f, 1f, 72);
             discMesh = BuildDisc(64);
@@ -70,6 +82,9 @@ namespace HackAndSlash
             if (discMesh) Object.Destroy(discMesh);
             if (dmgTextMat) Object.Destroy(dmgTextMat);
             dmgTextMat = null;
+            if (fallbackLit) Object.Destroy(fallbackLit);
+            fallbackLit = null;
+            MeshKit.ClearCache();
         }
 
         // ---------------------------------------------------------------- materials
@@ -78,7 +93,7 @@ namespace HackAndSlash
         {
             string key = "L" + baseColor + metallic + smoothness;
             if (matCache.TryGetValue(key, out var m) && m) return m;
-            m = new Material(gm.metalMaterial);
+            m = new Material(gm && gm.metalMaterial ? gm.metalMaterial : FallbackLit);
             m.SetColor("_BaseColor", baseColor);
             m.SetFloat("_Metallic", metallic);
             m.SetFloat("_Smoothness", smoothness);
@@ -91,7 +106,7 @@ namespace HackAndSlash
         {
             string key = "E" + c + intensity;
             if (matCache.TryGetValue(key, out var m) && m) return m;
-            m = new Material(gm.metalMaterial);
+            m = new Material(gm && gm.metalMaterial ? gm.metalMaterial : FallbackLit);
             m.SetColor("_BaseColor", c * 0.25f);
             m.SetFloat("_Metallic", 0f);
             m.SetFloat("_Smoothness", 0.8f);
@@ -278,7 +293,7 @@ namespace HackAndSlash
             go.AddComponent<FloatingTextFX>().Init(crit);
         }
 
-        public static void AfterImage(SkinnedMeshRenderer smr, Color c, float life = 0.3f)
+        public static void AfterImage(SkinnedMeshRenderer smr, Color c, float life = 0.3f, List<Renderer> extra = null)
         {
             var mesh = new Mesh { name = "Ghost" };
             smr.BakeMesh(mesh, true);
@@ -289,7 +304,27 @@ namespace HackAndSlash
             mr.sharedMaterial = flat;
             mr.shadowCastingMode = ShadowCastingMode.Off;
             mr.receiveShadows = false;
-            go.AddComponent<GhostFX>().Init(mesh, c, life);
+            var ghost = go.AddComponent<GhostFX>();
+            if (extra != null)
+            {
+                // armour plates are rigid: snapshot each one as a child of the ghost
+                foreach (var r in extra)
+                {
+                    if (!r || !r.enabled) continue;
+                    var mf = r.GetComponent<MeshFilter>();
+                    if (!mf || !mf.sharedMesh) continue;
+                    var p = new GameObject("GhostPart");
+                    p.transform.SetParent(go.transform, false);
+                    p.transform.SetPositionAndRotation(r.transform.position, r.transform.rotation);
+                    p.transform.localScale = Vector3.Scale(r.transform.lossyScale, new Vector3(1f / Mathf.Max(1e-5f, go.transform.lossyScale.x), 1f / Mathf.Max(1e-5f, go.transform.lossyScale.y), 1f / Mathf.Max(1e-5f, go.transform.lossyScale.z)));
+                    p.AddComponent<MeshFilter>().sharedMesh = mf.sharedMesh;
+                    var pr = p.AddComponent<MeshRenderer>();
+                    pr.sharedMaterial = flat;
+                    pr.shadowCastingMode = ShadowCastingMode.Off;
+                    pr.receiveShadows = false;
+                }
+            }
+            ghost.Init(mesh, c, life);
         }
 
         public static void Debris(Vector3 pos, Material a, Material b, int count, float scale, Vector3 bias)
@@ -310,6 +345,57 @@ namespace HackAndSlash
                 Vector3 v = (Random.insideUnitSphere + Vector3.up * 1.3f + bias * 0.7f).normalized * (Random.Range(4f, 10f) * Mathf.Sqrt(scale));
                 c.AddComponent<DebrisFX>().Init(v, Random.insideUnitSphere * 900f, Random.Range(1.3f, 2.3f), s);
             }
+        }
+
+        /// <summary>Blade-on-blade parry: a hot white star, a ring of sparks and a hard light pop.</summary>
+        public static void Clash(Vector3 pos, Vector3 normal, Color tint)
+        {
+            Burst(pos, Color.white, new Color(1f, 0.85f, 0.55f), 40, new Vector2(6f, 16f), new Vector2(0.03f, 0.07f), new Vector2(0.12f, 0.35f), 1.4f, true, 0.05f);
+            Burst(pos, new Color(2.5f, 2.4f, 2.2f), tint, 1, Vector2.zero, new Vector2(3.4f, 3.4f), new Vector2(0.09f, 0.11f));
+            Burst(pos, tint, Color.white, 14, new Vector2(1f, 4f), new Vector2(0.15f, 0.3f), new Vector2(0.12f, 0.25f));
+            Star(pos, new Color(2.6f, 2.5f, 2.3f, 1f), 2.6f, 0.13f);
+            LightFlash(pos, new Color(0.9f, 0.95f, 1f), 14f, 7f, 0.16f);
+        }
+
+        /// <summary>Anamorphic lens streak (two crossed stretched quads) that pops and fades.</summary>
+        public static void Star(Vector3 pos, Color c, float size, float life)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                var q = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                var col = q.GetComponent<Collider>();
+                if (col) Object.DestroyImmediate(col);
+                q.name = "FX_Star";
+                Adopt(q);
+                q.transform.position = pos;
+                var mr = q.GetComponent<MeshRenderer>();
+                mr.sharedMaterial = glow;
+                mr.shadowCastingMode = ShadowCastingMode.Off;
+                mr.receiveShadows = false;
+                q.AddComponent<StarFX>().Init(c, i == 0 ? new Vector2(size * 2.2f, size * 0.12f) : new Vector2(size * 0.18f, size * 0.8f), life);
+            }
+        }
+
+        /// <summary>Jagged electric arc between two points (re-randomised every frame while it lives).</summary>
+        public static void Arc(Vector3 a, Vector3 b, Color c, float life, float width = 0.03f, Transform follow = null)
+        {
+            var go = NewObject("FX_Arc");
+            var lr = go.AddComponent<LineRenderer>();
+            lr.sharedMaterial = flat;
+            lr.shadowCastingMode = ShadowCastingMode.Off;
+            lr.receiveShadows = false;
+            lr.numCapVertices = 2;
+            lr.widthMultiplier = width;
+            go.AddComponent<ArcFX>().Init(lr, a, b, c, life, follow);
+        }
+
+        /// <summary>Puff of grit where a robot lands or slams the floor.</summary>
+        public static void Dust(Vector3 pos, float scale)
+        {
+            Vector3 g = new Vector3(pos.x, 0.05f, pos.z);
+            Burst(g, new Color(0.35f, 0.34f, 0.38f, 0.55f), new Color(0.2f, 0.2f, 0.24f, 0.35f), Mathf.RoundToInt(16 * scale), new Vector2(1.5f, 4f) * scale, new Vector2(0.4f, 0.9f) * scale, new Vector2(0.5f, 1.0f), -0.02f, false, 0.4f * scale);
+            Burst(g, new Color(0.7f, 0.8f, 1f, 0.7f), new Color(0.5f, 0.6f, 0.8f, 0.4f), Mathf.RoundToInt(22 * scale), new Vector2(2f, 5f) * scale, new Vector2(0.03f, 0.06f), new Vector2(0.2f, 0.45f), 1.2f, true, 0.3f * scale, Vector3.up, 75f);
+            Shockwave(g, 1.6f * scale, new Color(0.6f, 0.7f, 0.9f, 0.6f), 0.35f);
         }
 
         // ---------------------------------------------------------------- ambient (also used by the editor scene builder)
@@ -622,13 +708,13 @@ namespace HackAndSlash
         Mesh mesh;
         Color color;
         float life, age;
-        MeshRenderer mr;
+        MeshRenderer[] mrs;
 
         public void Init(Mesh m, Color c, float l)
         {
             mesh = m; color = c; life = l;
-            mr = GetComponent<MeshRenderer>();
-            FX.SetColor(mr, c);
+            mrs = GetComponentsInChildren<MeshRenderer>();
+            foreach (var r in mrs) FX.SetColor(r, c);
         }
 
         void Update()
@@ -637,7 +723,7 @@ namespace HackAndSlash
             float u = Mathf.Clamp01(age / life);
             var c = color;
             c.a = color.a * (1f - u) * (1f - u);
-            FX.SetColor(mr, c);
+            foreach (var r in mrs) if (r) FX.SetColor(r, c);
             if (u >= 1f) Destroy(gameObject);
         }
 
@@ -703,6 +789,133 @@ namespace HackAndSlash
             c.a = 0.55f * (1f - u);
             FX.SetColor(mr, c);
             if (u >= 1f) Destroy(gameObject);
+        }
+    }
+
+    public class StarFX : MonoBehaviour
+    {
+        Color color;
+        Vector2 size;
+        float life, age;
+        MeshRenderer mr;
+
+        public void Init(Color c, Vector2 s, float l)
+        {
+            color = c; size = s; life = l;
+            mr = GetComponent<MeshRenderer>();
+            LateUpdate();
+        }
+
+        void LateUpdate()
+        {
+            age += Time.unscaledDeltaTime;
+            float u = Mathf.Clamp01(age / life);
+            var cam = Camera.main;
+            if (cam) transform.rotation = cam.transform.rotation;
+            float k = 1f - u;
+            transform.localScale = new Vector3(size.x * (0.6f + 0.4f * k), size.y * k, 1f);
+            var c = color; c.a = k * k;
+            FX.SetColor(mr, c);
+            if (u >= 1f) Destroy(gameObject);
+        }
+    }
+
+    public class ArcFX : MonoBehaviour
+    {
+        LineRenderer lr;
+        Vector3 a, b, offsetB;
+        Color color;
+        float life, age;
+        Transform follow;
+        const int Points = 9;
+
+        public void Init(LineRenderer line, Vector3 from, Vector3 to, Color c, float l, Transform f)
+        {
+            lr = line; a = from; b = to; color = c; life = l; follow = f;
+            if (follow) offsetB = to - follow.position;
+            lr.positionCount = Points;
+            Update();
+        }
+
+        void Update()
+        {
+            age += Time.deltaTime;
+            float u = Mathf.Clamp01(age / life);
+            Vector3 end = follow ? follow.position + offsetB : b;
+            Vector3 d = end - a;
+            float len = d.magnitude;
+            Vector3 side = Vector3.Cross(d, Vector3.up);
+            if (side.sqrMagnitude < 1e-4f) side = Vector3.Cross(d, Vector3.right);
+            side.Normalize();
+            Vector3 up2 = Vector3.Cross(side, d).normalized;
+            for (int i = 0; i < Points; i++)
+            {
+                float t = i / (float)(Points - 1);
+                float amp = Mathf.Sin(t * Mathf.PI) * len * 0.12f;
+                lr.SetPosition(i, a + d * t + (side * Random.Range(-1f, 1f) + up2 * Random.Range(-1f, 1f)) * amp);
+            }
+            // vertex colours are LDR, so the HDR intensity (for bloom) rides on the material tint
+            float alpha = (1f - u) * (Random.value < 0.25f ? 0.3f : 1f);
+            lr.startColor = lr.endColor = new Color(1f, 1f, 1f, alpha);
+            FX.SetColor(lr, new Color(color.r, color.g, color.b, 1f));
+            if (u >= 1f) Destroy(gameObject);
+        }
+    }
+
+    /// <summary>
+    /// Arkham-style "spider-sense": lightning glyphs that flicker above a robot's head while its attack can be countered
+    /// (blue) or must be dodged (red).
+    /// </summary>
+    public class CounterIndicator : MonoBehaviour
+    {
+        MeshRenderer mr;
+        Transform owner;
+        float height, size, pop, shown;
+        bool visible, danger;
+
+        public static CounterIndicator Create(Transform owner, float height, float size)
+        {
+            var q = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            var col = q.GetComponent<Collider>();
+            if (col) Object.DestroyImmediate(col);
+            q.name = "FX_SpiderSense";
+            FX.Adopt(q);
+            var ci = q.AddComponent<CounterIndicator>();
+            ci.owner = owner;
+            ci.height = height;
+            ci.size = size;
+            ci.mr = q.GetComponent<MeshRenderer>();
+            ci.mr.sharedMaterial = FX.SpiderMat;
+            ci.mr.shadowCastingMode = ShadowCastingMode.Off;
+            ci.mr.receiveShadows = false;
+            ci.mr.enabled = false;
+            return ci;
+        }
+
+        public void Show(bool on, bool unblockable)
+        {
+            if (on && (!visible || unblockable != danger)) { pop = 1f; shown = 0f; }
+            visible = on;
+            danger = unblockable;
+        }
+
+        void LateUpdate()
+        {
+            if (owner == null) { Destroy(gameObject); return; }
+            mr.enabled = visible;
+            if (!visible) return;
+            float dt = Time.unscaledDeltaTime;
+            shown += dt;
+            pop = Mathf.MoveTowards(pop, 0f, dt * 5f);
+            var cam = Camera.main;
+            Vector3 jitter = Random.insideUnitSphere * 0.02f;
+            transform.position = owner.position + Vector3.up * height + jitter;
+            if (cam) transform.rotation = cam.transform.rotation;
+            float s = size * (1f + pop * 0.8f) * (0.92f + 0.08f * Mathf.Sin(shown * 40f));
+            transform.localScale = new Vector3(s, s, 1f);
+            Color c = danger ? new Color(3.2f, 0.25f, 0.12f, 1f) : new Color(0.55f, 1.6f, 3.6f, 1f);
+            if (Random.value < 0.12f) c *= 0.45f;
+            FX.SetColor(mr, c);
         }
     }
 }

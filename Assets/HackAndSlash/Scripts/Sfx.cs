@@ -10,12 +10,15 @@ namespace HackAndSlash
         public static Sfx I { get; private set; }
 
         public AudioClip swing, swingHeavy, hit, hitHeavy, crit, clang, death, hurt, dash, nova, slam, spawn, cast, warn, drum, ting, charge;
+        public AudioClip parry, stun, thunder, thunderFar, rain, takedown, thud, whoom, servo;
+        public AudioClip[] clatter;
 
         const int SR = 44100;
         AudioSource[] pool;
         int next;
-        AudioSource musicSrc;
+        AudioSource musicSrc, rainSrc;
         GameManager gm;
+        float lastClatter;
 
         public void Init(GameManager g)
         {
@@ -37,8 +40,17 @@ namespace HackAndSlash
                 musicSrc.loop = true;
                 musicSrc.playOnAwake = false;
                 musicSrc.volume = 0.3f;
+                rainSrc = holder.AddComponent<AudioSource>();
+                rainSrc.loop = true;
+                rainSrc.playOnAwake = false;
+                rainSrc.volume = 0.32f;
             }
             if (swing == null) Generate();
+            if (rain && !rainSrc.isPlaying)
+            {
+                rainSrc.clip = rain;
+                rainSrc.Play();
+            }
             if (gm.music && !musicSrc.isPlaying)
             {
                 musicSrc.clip = gm.music;
@@ -49,8 +61,9 @@ namespace HackAndSlash
         void OnDestroy()
         {
             if (I == this) I = null;
-            foreach (var c in new[] { swing, swingHeavy, hit, hitHeavy, crit, clang, death, hurt, dash, nova, slam, spawn, cast, warn, drum, ting, charge })
+            foreach (var c in new[] { swing, swingHeavy, hit, hitHeavy, crit, clang, death, hurt, dash, nova, slam, spawn, cast, warn, drum, ting, charge, parry, stun, thunder, thunderFar, rain, takedown, thud, whoom, servo })
                 if (c) Destroy(c);
+            if (clatter != null) foreach (var c in clatter) if (c) Destroy(c);
         }
 
         void Update()
@@ -59,6 +72,7 @@ namespace HackAndSlash
             {
                 float target = gm.SlowMoScale < 0.6f ? 0.8f : 1f;
                 musicSrc.pitch = Mathf.Lerp(musicSrc.pitch, target, 1f - Mathf.Exp(-6f * Time.unscaledDeltaTime));
+                if (rainSrc) rainSrc.pitch = Mathf.Lerp(rainSrc.pitch, gm.SlowMoScale < 0.6f ? 0.55f : 1f, 1f - Mathf.Exp(-6f * Time.unscaledDeltaTime));
             }
         }
 
@@ -79,6 +93,14 @@ namespace HackAndSlash
             Play(heavy ? I.hitHeavy : I.hit, 0.85f, heavy ? 0.9f : 1f, 0.1f);
             if (isCrit) Play(I.crit, 0.45f, 1f, 0.05f);
             if (armored) Play(I.clang, 0.3f, 0.8f, 0.1f);
+        }
+
+        public static void Clatter(float strength)
+        {
+            if (I == null || I.clatter == null || I.clatter.Length == 0) return;
+            if (Time.unscaledTime - I.lastClatter < 0.03f) return;
+            I.lastClatter = Time.unscaledTime;
+            Play(I.clatter[Random.Range(0, I.clatter.Length)], Mathf.Lerp(0.08f, 0.32f, strength), Random.Range(0.85f, 1.25f), 0.05f);
         }
 
         public static void Footstep()
@@ -108,6 +130,85 @@ namespace HackAndSlash
             cast = Zap("cast", 0.35f, 22);
             warn = Warn("warn", 0.28f);
             charge = Charge("charge", 0.55f);
+            parry = Metal("parry", 1.1f, new[] { 1830f, 2475f, 3390f, 4410f, 5930f }, 3.2f, 23);
+            stun = Crackle("stun", 0.5f, 24);
+            thunder = Thunder("thunder", 4.5f, 25, true);
+            thunderFar = Thunder("thunderFar", 5.5f, 26, false);
+            rain = RainLoop("rain", 4f, 27);
+            takedown = Impact("takedown", 0.7f, 120f, 30f, 7f, 1.6f, 14f, 28);
+            thud = Impact("thud", 0.35f, 90f, 40f, 16f, 0.7f, 40f, 29);
+            whoom = Swell("whoom", 0.9f, 30);
+            clatter = new[] { Metal("clatter0", 0.22f, new[] { 2210f, 3120f, 4630f }, 26f, 31), Metal("clatter1", 0.25f, new[] { 1680f, 2850f, 3970f }, 22f, 32), Metal("clatter2", 0.18f, new[] { 2950f, 4120f, 6020f }, 30f, 33) };
+        }
+
+        static AudioClip Crackle(string name, float dur, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 2654435761u + 19u;
+            float hold = 0f, gate = 0f, phase = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR;
+                if (i % 220 == 0) gate = Noise(ref rng) > 0.1f ? 1f : 0.15f;
+                if (i % 3 == 0) hold = Noise(ref rng);
+                phase += 2f * Mathf.PI * (110f + 40f * Mathf.Sin(t * 30f)) / SR;
+                float buzz = Mathf.Sign(Mathf.Sin(phase)) * 0.25f;
+                d[i] = (hold * gate + buzz) * Mathf.Exp(-t * 4.5f);
+            }
+            return Make(name, d);
+        }
+
+        static AudioClip Thunder(string name, float dur, uint seed, bool close)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 1103515245u + 21u;
+            float lp = 0f, lp2 = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR;
+                float n = Noise(ref rng);
+                lp += (n - lp) * (close ? 0.08f : 0.03f);
+                lp2 += (lp - lp2) * 0.05f;
+                float rumble = lp2 * 6f * (0.55f + 0.45f * Mathf.Sin(t * 3.1f + Mathf.Sin(t * 7.3f))) * Mathf.Exp(-t * (close ? 0.9f : 0.6f));
+                float crack = close ? n * Mathf.Exp(-t * 9f) * 0.9f + lp * 2f * Mathf.Exp(-Mathf.Abs(t - 0.12f) * 18f) : 0f;
+                float attack = Mathf.Clamp01(t / (close ? 0.01f : 0.4f));
+                d[i] = Tanh((rumble + crack) * attack * 1.4f);
+            }
+            return Make(name, d);
+        }
+
+        static AudioClip RainLoop(string name, float dur, uint seed)
+        {
+            int n = (int)(dur * SR);
+            var d = new float[n];
+            uint rng = seed * 22695477u + 23u;
+            float low = 0f, band = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                float x = Noise(ref rng);
+                float f = 2f * Mathf.Sin(Mathf.PI * 2600f / SR);
+                float high = x - low - 0.7f * band;
+                band += f * high;
+                low += f * band;
+                float v = band * 0.5f + low * 0.15f;
+                if (Noise(ref rng) > 0.9965f) v += Noise(ref rng) * 2.2f; // individual drops
+                d[i] = v;
+            }
+            // crossfade the tail into the head so the loop is seamless
+            int xf = SR / 4;
+            for (int i = 0; i < xf; i++)
+            {
+                float k = i / (float)xf;
+                d[i] = d[i] * k + d[n - xf + i] * (1f - k);
+            }
+            var trimmed = new float[n - xf];
+            System.Array.Copy(d, trimmed, trimmed.Length);
+            float peak = 0.0001f;
+            for (int i = 0; i < trimmed.Length; i++) peak = Mathf.Max(peak, Mathf.Abs(trimmed[i]));
+            for (int i = 0; i < trimmed.Length; i++) trimmed[i] *= 0.8f / peak;
+            var c = AudioClip.Create("sfx_" + name, trimmed.Length, 1, SR, false);
+            c.SetData(trimmed, 0);
+            return c;
         }
 
         static float Noise(ref uint s)
