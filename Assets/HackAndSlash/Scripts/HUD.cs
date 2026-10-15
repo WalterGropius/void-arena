@@ -123,6 +123,12 @@ namespace HackAndSlash
             goGroup.alpha = 0f;
         }
 
+        // last values shown, so text (and its garbage) is only rebuilt when something changes
+        int lastHp = -1, lastSegs = -1, lastWave = -1, lastRemaining = -1, lastCombo = -1;
+        long lastScore = -1;
+        bool lastHolding;
+        Enemy lastBoss;
+
         void Update()
         {
             var gm = GameManager.I;
@@ -139,7 +145,8 @@ namespace HackAndSlash
             if (hp >= hpChipV) { hpChipV = hp; hpDelay = 0.4f; }
             else { hpDelay -= udt; if (hpDelay <= 0f) hpChipV = Mathf.MoveTowards(hpChipV, hp, udt * 0.6f); }
             UIKit.SetBar(hpChip, hpChipV);
-            hpText.text = Mathf.CeilToInt(p.Health) + " / " + Mathf.RoundToInt(p.maxHealth);
+            int hpNow = Mathf.CeilToInt(p.Health);
+            if (hpNow != lastHp) { lastHp = hpNow; hpText.text = hpNow + " / " + Mathf.RoundToInt(p.maxHealth); }
 
             // Void meter: three segments, each one more robot in a Cascade
             float vm = p.Void / PlayerController.VoidMax;
@@ -154,13 +161,13 @@ namespace HackAndSlash
             {
                 float k = 0.5f + 0.5f * Mathf.Sin(time * 8f);
                 voidImg.color = Color.Lerp(new Color(0.65f, 0.3f, 1f), new Color(0.4f, 0.95f, 1f), k);
-                voidText.text = "<b>C</b>  VOID CASCADE  x" + segs;
+                if (segs != lastSegs) voidText.text = "<b>C</b>  VOID CASCADE  x" + segs;
                 voidText.color = Color.Lerp(new Color(0.8f, 0.6f, 1f), Color.white, k);
             }
             else
             {
                 voidImg.color = new Color(0.55f, 0.28f, 0.95f);
-                voidText.text = "VOID";
+                if (segs != lastSegs) voidText.text = "VOID";
                 voidText.color = new Color(0.7f, 0.6f, 0.9f, 0.8f);
             }
 
@@ -171,7 +178,12 @@ namespace HackAndSlash
                 ammo[i].color = loaded ? new Color(1f, 0.72f, 0.3f) : new Color(1f, 1f, 1f, 0.12f);
             }
             UIKit.SetBar(tetherFill, p.TetherReady01);
-            gadgetText.text = (p.Holding ? "<color=#7fe4ff><b>LMB</b> RIP   <b>R</b> THROW</color>" : "<b>Q</b> BLASTER   <b>R</b> TETHER");
+            lastSegs = segs;
+            if (p.Holding != lastHolding || string.IsNullOrEmpty(gadgetText.text))
+            {
+                lastHolding = p.Holding;
+                gadgetText.text = p.Holding ? "<color=#7fe4ff><b>LMB</b> RIP   <b>R</b> THROW</color>" : "<b>Q</b> BLASTER   <b>R</b> TETHER";
+            }
 
             // aiming reticle (bullet time)
             aimGroup.alpha = Mathf.MoveTowards(aimGroup.alpha, p.Aiming ? 1f : 0f, udt * 8f);
@@ -185,28 +197,33 @@ namespace HackAndSlash
             hitMarker.color = new Color(1f, 1f, 1f, Mathf.Clamp01(1f - hitMarkerT / 0.25f));
 
             // wave & score
-            waveText.text = gm.Wave > 0 && gm.Mode == GameMode.Arcade ? "WAVE " + gm.Wave : "";
+            int waveShown = gm.Wave > 0 && gm.Mode == GameMode.Arcade ? gm.Wave : 0;
+            if (waveShown != lastWave) { lastWave = waveShown; waveText.text = waveShown > 0 ? "WAVE " + waveShown : ""; }
             int remaining = gm.enemies.Count + gm.PendingSpawns;
-            enemiesText.text = gm.Wave > 0 && remaining > 0 && gm.WaveActive ? remaining + (remaining == 1 ? " ASSOCIATE" : " ASSOCIATES") : "";
+            int remainingShown = gm.Wave > 0 && remaining > 0 && gm.WaveActive ? remaining : 0;
+            if (remainingShown != lastRemaining) { lastRemaining = remainingShown; enemiesText.text = remainingShown > 0 ? remainingShown + (remainingShown == 1 ? " ASSOCIATE" : " ASSOCIATES") : ""; }
             shownScore = Mathf.Lerp(shownScore, gm.Score, 1f - Mathf.Exp(-9f * udt));
             if (Mathf.Abs(shownScore - gm.Score) < 1f) shownScore = gm.Score;
-            scoreText.text = ((long)shownScore).ToString("N0");
+            long scoreNow = (long)shownScore;
+            if (scoreNow != lastScore) { lastScore = scoreNow; scoreText.text = scoreNow.ToString("N0"); }
 
             // combo
             if (gm.Combo >= 2)
             {
                 comboGroup.alpha = Mathf.MoveTowards(comboGroup.alpha, 1f, udt * 10f);
-                comboNum.text = gm.Combo.ToString();
+                bool comboChanged = gm.Combo != lastCombo;
+                lastCombo = gm.Combo;
+                if (comboChanged) comboNum.text = gm.Combo.ToString();
                 string label;
                 if (gm.Combo >= 50) { label = "VOID GOD"; comboColor = new Color(1f, 0.35f, 1f); }
                 else if (gm.Combo >= 30) { label = "SAVAGE!!"; comboColor = new Color(1f, 0.35f, 0.25f); }
                 else if (gm.Combo >= 15) { label = "BRUTAL!"; comboColor = new Color(1f, 0.65f, 0.2f); }
                 else if (gm.Combo >= 6) { label = "FREEFLOW"; comboColor = new Color(1f, 0.92f, 0.4f); }
                 else { label = "HITS"; comboColor = Color.white; }
-                comboLabel.text = label;
+                if (comboChanged) comboLabel.text = label;
                 comboNum.color = comboColor;
                 comboLabel.color = comboColor;
-                comboMult.text = "x" + gm.ComboMultiplier.ToString("0.00");
+                if (comboChanged) comboMult.text = "x" + gm.ComboMultiplier.ToString("0.00");
                 UIKit.SetBar(comboTimer, gm.ComboTimer01);
             }
             else comboGroup.alpha = Mathf.MoveTowards(comboGroup.alpha, 0f, udt * 3f);
@@ -259,7 +276,7 @@ namespace HackAndSlash
             if (boss != null && !boss.IsDead)
             {
                 bossGroup.alpha = Mathf.MoveTowards(bossGroup.alpha, 1f, udt * 3f);
-                bossName.text = boss.displayName.ToUpperInvariant();
+                if (boss != lastBoss) { lastBoss = boss; bossName.text = boss.displayName.ToUpperInvariant(); }
                 float b = boss.Health01;
                 UIKit.SetBar(bossFill, b);
                 if (b >= bossChipV) { bossChipV = b; bossDelay = 0.4f; }

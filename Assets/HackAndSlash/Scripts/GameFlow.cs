@@ -94,7 +94,7 @@ namespace HackAndSlash
             var plan = gm.Districts.Current != null ? gm.Districts.Current.plan : null;
             gm.ResetRun(plan != null ? plan.playerStart : Vector3.zero);
             gm.player.autopilot = true;
-            gm.player.InputLocked = false;
+            gm.player.InputLocked = true;
             gm.hud.SetVisible(false);
             gm.hud.Objective("");
             gm.cameraRig.TitleOrbit = true;
@@ -259,6 +259,9 @@ namespace HackAndSlash
         {
             if (transitioning) return;
             if (running != null) StopCoroutine(running);
+            // a line cut off mid-sentence would leave the dialogue busy forever, and old TalkLater calls would linger
+            story.StopAllCoroutines();
+            dialogue.ClearAll();
             running = StartCoroutine(StoryRoutine(chapter));
         }
 

@@ -18,7 +18,7 @@ namespace HackAndSlash
         const int SR = 44100;
         AudioSource[] pool;
         int next;
-        AudioSource rainSrc;
+        AudioSource rainSrc, uiSrc;
         AudioLowPassFilter rainFilter;
         GameManager gm;
         float lastClatter, rainTarget = 1f, rainCutoff = 22000f;
@@ -39,6 +39,11 @@ namespace HackAndSlash
                     s.spatialBlend = 0f;
                     pool[i] = s;
                 }
+                // menu blips must sound while the game (and AudioListener) is paused
+                uiSrc = holder.AddComponent<AudioSource>();
+                uiSrc.playOnAwake = false;
+                uiSrc.spatialBlend = 0f;
+                uiSrc.ignoreListenerPause = true;
                 // the rain gets its own object so a low-pass can muffle it indoors without touching anything else
                 var rainGo = new GameObject("Rain");
                 rainGo.transform.SetParent(transform, false);
@@ -88,6 +93,12 @@ namespace HackAndSlash
         public static void Play(AudioClip c, float volume = 1f, float pitch = 1f, float pitchVar = 0.06f)
         {
             if (I == null || c == null || I.pool == null) return;
+            if (I.uiSrc && (c == I.uiMove || c == I.uiSelect))
+            {
+                I.uiSrc.pitch = pitch;
+                I.uiSrc.PlayOneShot(c, volume * Settings.sfxVolume);
+                return;
+            }
             var s = I.pool[I.next];
             I.next = (I.next + 1) % I.pool.Length;
             s.clip = c;

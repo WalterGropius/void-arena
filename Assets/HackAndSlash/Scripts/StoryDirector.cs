@@ -281,12 +281,20 @@ namespace HackAndSlash
             int target = gm.WavesCleared + 1;
             gm.BeginWave(new Wave("HALCYON", "IN PERSON", T, G, G, N) { maxAlive = 6 });
             int stage = 0;
-            Enemy core = null;
+            Enemy core = null, lastBoss = null;
             while (gm.WavesCleared < target)
             {
                 var boss = gm.Boss;
+                if (boss != lastBoss)
+                {
+                    // a checkpoint retry brings a fresh Tyrant: the core sequence starts over
+                    lastBoss = boss;
+                    stage = 0;
+                    core = null;
+                }
                 if (boss != null && !boss.IsDead)
                 {
+                    if (stage % 2 == 1 && core == null) { stage++; boss.SetShielded(false); } // the core vanished with the field
                     float h = boss.Health01;
                     if (core == null && stage == 0 && h < 0.66f) { stage = 1; core = EjectCore(boss, "PRIDE"); TalkLater(Lines.Ch5Core1); }
                     else if (core == null && stage == 2 && h < 0.33f) { stage = 3; core = EjectCore(boss, "FEAR"); TalkLater(Lines.Ch5Core2); }

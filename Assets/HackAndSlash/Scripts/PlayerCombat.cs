@@ -165,6 +165,7 @@ namespace HackAndSlash
             {
                 impactDone = true;
                 ResolveStrike(def);
+                if (state != State.Strike) return Vector3.zero; // shocked by a charged robot (or killed by it)
             }
             if (t >= impactTime)
             {
@@ -816,7 +817,8 @@ namespace HackAndSlash
             stateTime = 0f;
             impactDone = false;
             var t = PickTarget(moveInput, 5.5f);
-            if (t) { attackDir = Flat(t.transform.position - transform.position).normalized; facing = attackDir; }
+            Vector3 toT = t ? Flat(t.transform.position - transform.position) : Vector3.zero;
+            if (toT.sqrMagnitude > 0.01f) { attackDir = toT.normalized; facing = attackDir; }
             else attackDir = moveInput.sqrMagnitude > 0.04f ? moveInput.normalized : facing;
             Sfx.Play(Sfx.I.swing, 0.55f, 0.8f);
         }

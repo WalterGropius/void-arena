@@ -82,6 +82,16 @@ namespace HackAndSlash
         GameObject bubble;
         Material bubbleMat;
         Ragdoll ragdoll;
+        float fxTimer;
+
+        /// <summary>Rate-limits per-frame effects by scaled time (so slow motion doesn't spawn hundreds of ghosts).</summary>
+        protected bool FxTick(float interval)
+        {
+            fxTimer -= Time.deltaTime;
+            if (fxTimer > 0f) return false;
+            fxTimer = interval;
+            return true;
+        }
 
         public State CurrentState => state;
         public bool IsDead => state == State.Dead;
@@ -102,7 +112,7 @@ namespace HackAndSlash
         public float Health01 => Mathf.Clamp01(health / maxHealth);
         public Color GlowColor => glowColor;
         public float LastAttackTime { get; protected set; } = -99f;
-        public bool HoldsShot => holdsShot;
+        public virtual bool HoldsShot => holdsShot;
 
         /// <summary>The attack can be countered right now (blue indicator).</summary>
         public virtual bool CanBeCountered
@@ -500,7 +510,7 @@ namespace HackAndSlash
                 // materialise: a column of code resolves into a robot
                 p = spawnTo;
                 model.localScale = new Vector3(1f, Mathf.Max(0.02f, u * u * (3f - 2f * u)), 1f);
-                if (Random.value < 0.4f) FX.Burst(spawnTo + Vector3.up * Random.Range(0f, 2.2f) * scale, new Color(0.3f, 1.6f, 0.5f), Color.white, 2, new Vector2(0.2f, 1f), new Vector2(0.03f, 0.06f), new Vector2(0.2f, 0.4f), -0.3f, false, 0.4f);
+                if (FxTick(0.03f)) FX.Burst(spawnTo + Vector3.up * Random.Range(0f, 2.2f) * scale, new Color(0.3f, 1.6f, 0.5f), Color.white, 2, new Vector2(0.2f, 1f), new Vector2(0.03f, 0.06f), new Vector2(0.2f, 0.4f), -0.3f, false, 0.4f);
             }
             else
             {
@@ -725,6 +735,11 @@ namespace HackAndSlash
             var player = gm.player;
             switch (type)
             {
+                case EnemyType.Gunner when armed:
+                    // the burst: stay shouldered, the recoil comes from rig.Jolt in Burst()
+                    rig.SetTarget(new Vector3(0.12f, 1.42f, 0.42f), new Vector3(0f, 0.04f, 1f), 18f);
+                    rig.leftHandWeight = 1f;
+                    break;
                 case EnemyType.Grunt:
                 case EnemyType.Medic:
                 case EnemyType.Gunner:
@@ -910,7 +925,7 @@ namespace HackAndSlash
             rig.bodyPitch = -50f * lean;
             rig.bodyOffset = new Vector3(0f, -0.35f * lean, -0.2f * lean);
             rig.plantFeet = lean;
-            if (Random.value < 0.35f) FX.AfterImage(body, new Color(0.3f, 1.6f, 0.5f, 0.35f), 0.25f, armor ? armor.Renderers : null);
+            if (FxTick(0.05f)) FX.AfterImage(body, new Color(0.3f, 1.6f, 0.5f, 0.35f), 0.25f, armor ? armor.Renderers : null);
             if (u >= 1f)
             {
                 // and the answer: an instant, short counter-attack
@@ -1097,7 +1112,7 @@ namespace HackAndSlash
             throwVel += Vector3.down * (20f * dt);
             Vector3 p = transform.position + throwVel * dt;
             model.localRotation *= Quaternion.Euler(throwSpin * dt);
-            if (Random.value < 0.5f) FX.AfterImage(body, new Color(0.3f, 0.8f, 2.2f, 0.3f), 0.18f, armor ? armor.Renderers : null);
+            if (FxTick(0.04f)) FX.AfterImage(body, new Color(0.3f, 0.8f, 2.2f, 0.3f), 0.18f, armor ? armor.Renderers : null);
             // bowling: knock down anything in the way
             Vector3 c = p + Vector3.up * (1.0f * scale);
             var list = gm.enemies;

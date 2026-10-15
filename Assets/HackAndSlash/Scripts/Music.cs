@@ -187,9 +187,12 @@ namespace HackAndSlash
 
         // ---------------------------------------------------------------- lifecycle
 
+        readonly Style[] styles = new Style[(int)Cue.Credits + 1];
+
         void Awake()
         {
             I = this;
+            for (int c = 0; c < styles.Length; c++) styles[c] = Make((Cue)c);
             sr = AudioSettings.outputSampleRate > 0 ? AudioSettings.outputSampleRate : 48000;
             float k = sr / 44100f;
             int[] cl = { 1116, 1188, 1277, 1356 };
@@ -202,6 +205,7 @@ namespace HackAndSlash
             src.spatialBlend = 0f;
             src.volume = 1f;
             src.clip = null;
+            src.ignoreListenerPause = true; // the score keeps playing under the pause menu
             src.Play();
         }
 
@@ -211,7 +215,9 @@ namespace HackAndSlash
         {
             volume = Settings.musicVolume;
             var gm = GameManager.I;
-            float want = gm && gm.SlowMoScale < 0.6f ? 0.82f : 1f;
+            float slow = gm ? gm.SlowMoScale : 1f;
+            if (gm && gm.player) slow = Mathf.Min(slow, gm.player.FocusScale);
+            float want = slow < 0.6f ? 0.82f : 1f;
             if (gm && gm.Paused) want = 1f;
             rate = Mathf.Lerp(rate, want, 1f - Mathf.Exp(-5f * Time.unscaledDeltaTime));
         }
@@ -239,7 +245,7 @@ namespace HackAndSlash
         void LoadStyle(int cue)
         {
             currentCue = cue;
-            style = Make((Cue)cue);
+            style = cue >= 0 && cue < styles.Length ? styles[cue] : null; // built on the main thread in Awake
             step = 0; bar = 0; chordIndex = 0; melodyIndex = 0; melodyBeatsLeft = 0f; stepPos = 0.0;
             if (style == null) return;
             var ch = style.chords[0];
@@ -338,6 +344,7 @@ namespace HackAndSlash
                         int d = ((deg % 7) + 7) % 7;
                         melFreq = Mtof(style.melodyRoot + oct * 12 + style.scale[d]);
                         melEnv = 1f;
+                        melVib = 0f;
                         melGate = len;
                         melPhase2 = 0f;
                     }
@@ -387,7 +394,7 @@ namespace HackAndSlash
 
                 // gramophone wow
                 float pitch = r;
-                if (style.gramophone) { wow += dt * 0.55f; pitch *= 1f + 0.004f * Mathf.Sin(wow * 6.2831f) + 0.0015f * Mathf.Sin(wow * 31f); }
+                if (style.gramophone) { wow += dt * 0.55f; if (wow > 100f) wow -= 100f; pitch *= 1f + 0.004f * Mathf.Sin(wow * 6.2831f) + 0.0015f * Mathf.Sin(wow * 31f); }
 
                 // ---- pad (two detuned saws per voice, gliding, through a breathing low-pass)
                 float pad = 0f;

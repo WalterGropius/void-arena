@@ -216,7 +216,7 @@ namespace HackAndSlash
         void Update()
         {
             if (gm == null) gm = GameManager.I;
-            if (gm == null) return;
+            if (gm == null || gm.Paused) return;
             float dt = Time.deltaTime;
             float udt = Time.unscaledDeltaTime;
 

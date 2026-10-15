@@ -40,6 +40,7 @@ namespace HackAndSlash
         public override Vector3 Head => transform.position + Vector3.up * (core ? 0.75f : 0.35f);
         public override float Radius => core ? 0.6f : 0.5f;
         public bool IsCore => core;
+        public override bool HoldsShot => reservedShot;
 
         /// <summary>Only the instant before the trigger can be countered (the round goes back).</summary>
         public override bool CanBeCountered => !core && state == State.Aim && stateTime >= stateDur - 0.38f - Settings.CounterLeniency;
@@ -264,7 +265,7 @@ namespace HackAndSlash
                     target = new Vector3(p.x, 1.5f + 0.15f * Mathf.Sin(stateTime * 9f), p.z);
                     hull.localRotation = Quaternion.Euler(18f * Mathf.Sin(stateTime * 7f), stateTime * 120f, 22f * Mathf.Sin(stateTime * 5f));
                     glow = Random.value < 0.35f ? 0.1f : 1.3f;
-                    if (Random.value < 0.25f) FX.Arc(transform.position + Random.insideUnitSphere * 0.4f, transform.position + Random.insideUnitSphere * 0.5f, new Color(0.6f, 1.4f, 3.5f, 1f), 0.1f, 0.02f);
+                    if (FxTick(0.07f)) FX.Arc(transform.position + Random.insideUnitSphere * 0.4f, transform.position + Random.insideUnitSphere * 0.5f, new Color(0.6f, 1.4f, 3.5f, 1f), 0.1f, 0.02f);
                     if (stateTime >= stateDur) { hull.localRotation = Quaternion.identity; Recover(); }
                     break;
                 }
@@ -425,8 +426,12 @@ namespace HackAndSlash
         {
             if (state != State.Grabbed && state != State.Pulled) return;
             holder = null;
-            hull.localRotation = Quaternion.identity;
-            Stun(1.2f);
+            if (hull) hull.localRotation = Quaternion.identity;
+            // leave Grabbed/Pulled first (Stun refuses while held); a core simply resumes orbiting, tetherable again
+            state = State.Circle;
+            stateTime = 0f;
+            if (!core) Stun(1.2f);
+            else nextFire = Time.time + 1f;
         }
 
         /// <summary>Tear the rotors off a held Hornet (or the casing off a core). Always lethal.</summary>
@@ -573,7 +578,7 @@ namespace HackAndSlash
                 fallVel += Vector3.down * (22f * dt);
                 transform.position += fallVel * dt;
                 if (hull) hull.localRotation *= Quaternion.Euler(fallSpin * dt);
-                if (Random.value < 0.5f) FX.Burst(transform.position, new Color(0.15f, 0.13f, 0.14f, 0.6f), new Color(0.05f, 0.05f, 0.06f, 0.4f), 1, new Vector2(0.2f, 0.6f), new Vector2(0.25f, 0.5f), new Vector2(0.5f, 0.9f), -0.1f, false, 0.1f);
+                if (FxTick(0.04f)) FX.Burst(transform.position, new Color(0.15f, 0.13f, 0.14f, 0.6f), new Color(0.05f, 0.05f, 0.06f, 0.4f), 1, new Vector2(0.2f, 0.6f), new Vector2(0.25f, 0.5f), new Vector2(0.5f, 0.9f), -0.1f, false, 0.1f);
                 if (transform.position.y <= 0.2f)
                 {
                     Vector3 p = transform.position; p.y = 0.2f;
