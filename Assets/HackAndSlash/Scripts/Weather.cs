@@ -18,11 +18,30 @@ namespace HackAndSlash
         ParticleSystem rain, splashes, ripples;
         Transform follow;
 
-        void Start()
+        void Awake()
         {
             rain = Rain();
             splashes = Splashes();
             ripples = Ripples();
+        }
+
+        /// <summary>Scales the storm at runtime (0 = dry). Splashes and ripples only fall on wet open ground.</summary>
+        public void SetIntensity(float k, bool groundEffects)
+        {
+            intensity = k;
+            if (!rain) return;
+            var em = rain.emission; em.rateOverTime = 4200f * k;
+            var es = splashes.emission; es.rateOverTime = groundEffects ? 900f * k : 0f;
+            var er = ripples.emission; er.rateOverTime = groundEffects ? 1100f * k : 0f;
+            if (k <= 0.001f) { rain.Clear(); splashes.Clear(); ripples.Clear(); }
+        }
+
+        public void SetGroundRadius(float r)
+        {
+            roofRadius = r;
+            if (!splashes) return;
+            var a = splashes.shape; a.radius = r;
+            var b = ripples.shape; b.radius = r;
         }
 
         void LateUpdate()

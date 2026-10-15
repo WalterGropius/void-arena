@@ -30,6 +30,11 @@ namespace HackAndSlash
 
         [Header("Beacons")]
         public Renderer[] beacons;
+        /// <summary>Beacons belonging to the current district (blinked together with the scene's own).</summary>
+        public readonly List<Renderer> extraBeacons = new List<Renderer>();
+        /// <summary>The storm runs while true (off indoors, in the Construct, and after midnight).</summary>
+        public bool stormEnabled = true;
+        public float stormStrength = 1f;
 
         static readonly int FlashId = Shader.PropertyToID("_Flash");
         static readonly int EmissionId = Shader.PropertyToID("_EmissionColor");
@@ -85,19 +90,28 @@ namespace HackAndSlash
 
         void Update()
         {
-            if (!striking && Time.time >= nextStrike) Lightning(1f);
-            if (beacons != null && beacons.Length > 0)
-            {
-                for (int i = 0; i < beacons.Length; i++)
-                {
-                    var r = beacons[i];
-                    if (!r) continue;
-                    float phase = Mathf.Repeat(Time.time * 0.8f + i * 0.37f, 1f);
-                    float on = phase < 0.12f ? 1f : 0.05f;
-                    mpb.SetColor(EmissionId, new Color(4f, 0.15f, 0.05f) * on);
-                    r.SetPropertyBlock(mpb);
-                }
-            }
+            if (stormEnabled && !striking && Time.time >= nextStrike) Lightning(stormStrength);
+            if (beacons != null) for (int i = 0; i < beacons.Length; i++) Blink(beacons[i], i);
+            for (int i = 0; i < extraBeacons.Count; i++) Blink(extraBeacons[i], i + 17);
+        }
+
+        void Blink(Renderer r, int i)
+        {
+            if (!r) return;
+            float phase = Mathf.Repeat(Time.time * 0.8f + i * 0.37f, 1f);
+            float on = phase < 0.12f ? 1f : 0.05f;
+            mpb.SetColor(EmissionId, new Color(4f, 0.15f, 0.05f) * on);
+            r.SetPropertyBlock(mpb);
+        }
+
+        /// <summary>Re-captures the reflection probe (after a district change).</summary>
+        public void RefreshProbe() => StartCoroutine(RenderProbeLater());
+
+        IEnumerator RenderProbeLater()
+        {
+            yield return null;
+            yield return null;
+            if (probe) probe.RenderProbe();
         }
 
         /// <summary>A lightning strike: two or three flashes, a fork on the skyline, thunder after a delay.</summary>
@@ -143,56 +157,6 @@ namespace HackAndSlash
             if (Sfx.I) Sfx.Play(strength > 1.2f || Random.value < 0.4f ? Sfx.I.thunder : Sfx.I.thunderFar, Mathf.Clamp01(0.55f * strength + 0.25f), Random.Range(0.85f, 1.1f), 0f);
             if (strength > 1.2f && GameManager.I && GameManager.I.cameraRig) GameManager.I.cameraRig.Shake(0.25f);
             striking = false;
-        }
-    }
-
-    /// <summary>Sweeps a searchlight (or anything) back and forth around its local Y and X axes.</summary>
-    public class Sweeper : MonoBehaviour
-    {
-        public float yawAmplitude = 35f, yawSpeed = 0.25f, pitchAmplitude = 8f, pitchSpeed = 0.17f;
-        Quaternion baseRot;
-        float phase;
-
-        void Awake()
-        {
-            baseRot = transform.localRotation;
-            phase = Random.value * 10f;
-        }
-
-        void Update()
-        {
-            float t = Time.time + phase;
-            transform.localRotation = baseRot * Quaternion.Euler(Mathf.Sin(t * pitchSpeed * Mathf.PI * 2f) * pitchAmplitude, Mathf.Sin(t * yawSpeed * Mathf.PI * 2f) * yawAmplitude, 0f);
-        }
-    }
-
-    /// <summary>Neon sign buzz: mostly steady, with the occasional stutter.</summary>
-    public class NeonFlicker : MonoBehaviour
-    {
-        public Color emission = Color.white;
-        public Light linkedLight;
-        Renderer r;
-        MaterialPropertyBlock mpb;
-        float baseLight, glitch;
-
-        void Awake()
-        {
-            r = GetComponent<Renderer>();
-            mpb = new MaterialPropertyBlock();
-            if (linkedLight) baseLight = linkedLight.intensity;
-        }
-
-        void Update()
-        {
-            glitch -= Time.deltaTime;
-            if (glitch <= 0f && Random.value < 0.004f) glitch = Random.Range(0.08f, 0.35f);
-            float k = glitch > 0f ? (Random.value < 0.5f ? 0.15f : 1f) : 1f;
-            if (r)
-            {
-                mpb.SetColor("_EmissionColor", emission * k);
-                r.SetPropertyBlock(mpb);
-            }
-            if (linkedLight) linkedLight.intensity = baseLight * k;
         }
     }
 }
