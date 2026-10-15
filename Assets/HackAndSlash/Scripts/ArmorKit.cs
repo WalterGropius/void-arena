@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 
 namespace HackAndSlash
 {
-    public enum ArmorStyle { Hero, Scrapper, Hexer, Bulwark, Juggernaut, Tyrant }
+    public enum ArmorStyle { Hero, Scrapper, Hexer, Bulwark, Juggernaut, Tyrant, Enforcer, Auditor, Mender }
 
     /// <summary>Look of one robot faction: clear-coated paint, trim, joints, emissive accents, and how chunky the plates are.</summary>
     public struct ArmorPalette
@@ -28,6 +28,12 @@ namespace HackAndSlash
                     p.paint = new Color(0.07f, 0.12f, 0.26f); p.trim = new Color(0.82f, 0.84f, 0.86f); p.trimMetal = 0.1f; p.glow = new Color(0.35f, 0.9f, 3.4f); p.bulk = 1.1f; break;
                 case ArmorStyle.Juggernaut: // industrial yellow, scuffed
                     p.paint = new Color(0.86f, 0.62f, 0.06f); p.paintSmooth = 0.62f; p.clearCoat = 0.4f; p.trim = new Color(0.08f, 0.08f, 0.09f); p.glow = new Color(3.2f, 1.1f, 0.15f); p.bulk = 1.35f; break;
+                case ArmorStyle.Enforcer: // municipal militia: matte olive and gunmetal, sodium-orange optics
+                    p.paint = new Color(0.2f, 0.22f, 0.16f); p.paintSmooth = 0.45f; p.clearCoat = 0.15f; p.trim = new Color(0.1f, 0.1f, 0.11f); p.glow = new Color(3.6f, 0.9f, 0.15f); p.bulk = 1.05f; break;
+                case ArmorStyle.Auditor: // the Agents: black lacquer suit, white collar, green code-light
+                    p.paint = new Color(0.015f, 0.015f, 0.018f); p.paintSmooth = 0.96f; p.paintMetal = 0.2f; p.trim = new Color(0.9f, 0.9f, 0.88f); p.trimMetal = 0f; p.trimSmooth = 0.5f; p.glow = new Color(0.35f, 3.4f, 0.7f); p.bulk = 0.92f; break;
+                case ArmorStyle.Mender: // paramedic white with signal red, healing-green light
+                    p.paint = new Color(0.9f, 0.9f, 0.88f); p.paintSmooth = 0.8f; p.trim = new Color(0.75f, 0.06f, 0.05f); p.trimMetal = 0.1f; p.trimSmooth = 0.7f; p.glow = new Color(0.4f, 3.2f, 1.6f); p.bulk = 0.92f; break;
                 default: // Iron Tyrant: gunmetal and gold chrome
                     p.paint = new Color(0.12f, 0.11f, 0.11f); p.paintMetal = 0.85f; p.paintSmooth = 0.82f; p.trim = new Color(1f, 0.72f, 0.3f); p.trimMetal = 1f; p.trimSmooth = 0.9f; p.glow = new Color(3.6f, 0.45f, 0.08f); p.bulk = 1.3f; break;
             }
@@ -98,6 +104,8 @@ namespace HackAndSlash
             paint.SetFloat("_ClearCoatSmoothness", 0.94f);
             paint.EnableKeyword("_EMISSION");
             paint.SetColor(EmissionId, Color.black);
+            // procedural panel lines, scratches and grime (scuffed militia kit, pristine agents)
+            TexLibrary.ApplyArmorDetail(paint, p.style == ArmorStyle.Auditor || p.style == ArmorStyle.Hero ? 0.35f : p.style == ArmorStyle.Enforcer || p.style == ArmorStyle.Juggernaut ? 1f : 0.7f);
 
             trim = FX.Lit(p.trim, p.trimMetal, p.trimSmooth);
             joint = FX.Lit(p.joint, 0.95f, 0.8f);
@@ -119,6 +127,9 @@ namespace HackAndSlash
                 body.sharedMaterial = suit;
             }
         }
+
+        /// <summary>Re-applies the generated detail layer (the hero is built before the texture library finishes).</summary>
+        public void RefreshDetail(float strength) => TexLibrary.ApplyArmorDetail(paint, strength);
 
         void OnDestroy()
         {
@@ -159,6 +170,24 @@ namespace HackAndSlash
                 Box("Pack", ch, At(0f, 1.38f, -0.2f * bulk), Upright, new Vector3(0.27f * bulk, 0.25f, 0.12f), 0.035f, trim, true);
                 for (int i = 0; i < 3; i++)
                     Box("Vent", ch, At(0f, 1.32f + i * 0.055f, -0.262f * bulk), Upright, new Vector3(0.18f * bulk, 0.013f, 0.012f), 0.004f, glow, false);
+                if (st == ArmorStyle.Enforcer)
+                {
+                    // ammo pouches and a chest rig
+                    for (int i = -1; i <= 1; i++)
+                        Box("Pouch", ch, At(i * 0.09f, 1.25f, 0.17f * bulk), Upright, new Vector3(0.075f, 0.09f, 0.05f), 0.015f, trim, true);
+                    Box("Strap", ch, At(0f, 1.42f, 0.17f * bulk), Quaternion.AngleAxis(35f, fwd) * Upright, new Vector3(0.05f, 0.42f, 0.02f), 0.006f, trim, false);
+                }
+                if (st == ArmorStyle.Auditor)
+                {
+                    // a necktie, because the Board insisted
+                    Box("Tie", ch, At(0f, 1.38f, 0.178f * bulk), Upright, new Vector3(0.04f, 0.2f, 0.012f), 0.006f, joint, false, 0.7f);
+                }
+                if (st == ArmorStyle.Mender)
+                {
+                    Box("CrossV", ch, At(0f, 1.38f, -0.27f * bulk), Upright, new Vector3(0.05f, 0.16f, 0.02f), 0.006f, trim, false);
+                    Box("CrossH", ch, At(0f, 1.39f, -0.27f * bulk), Upright, new Vector3(0.16f, 0.05f, 0.02f), 0.006f, trim, false);
+                    Box("Canister", ch, At(0.1f, 1.5f, -0.26f * bulk), Vertical, new Vector3(0.06f, 0.06f, 0.16f), 0.028f, glow, true);
+                }
                 if (st == ArmorStyle.Juggernaut || st == ArmorStyle.Tyrant)
                 {
                     Box("Exhaust", ch, At(0.09f, 1.52f, -0.24f * bulk), Vertical, new Vector3(0.06f, 0.06f, 0.18f), 0.028f, joint, true);
@@ -262,6 +291,27 @@ namespace HackAndSlash
                     Box("Cyclops", H, At(0f, 1.66f, 0.155f), Upright, new Vector3(0.09f, 0.05f, 0.04f), 0.02f, glow, false);
                     Box("Grille", H, At(0f, 1.585f, 0.14f), Upright, new Vector3(0.18f, 0.06f, 0.05f), 0.015f, trim, false);
                     break;
+                case ArmorStyle.Enforcer:
+                    Box("Helmet", H, At(0f, 1.675f, -0.01f), Upright, new Vector3(0.27f, 0.25f, 0.3f), 0.1f, paint, false);
+                    Box("Mask", H, At(0f, 1.6f, 0.11f), Upright, new Vector3(0.17f, 0.1f, 0.08f), 0.03f, trim, false);
+                    for (int i = -1; i <= 1; i++)
+                        Box("Lens", H, At(i * 0.05f, 1.665f, 0.14f), Upright, new Vector3(0.032f, 0.032f, 0.03f), 0.014f, glow, false);
+                    Box("Rail", H, At(0.13f, 1.69f, 0.02f), Upright, new Vector3(0.025f, 0.03f, 0.16f), 0.008f, trim, false);
+                    break;
+                case ArmorStyle.Auditor:
+                    Box("Head", H, At(0f, 1.67f, 0.0f), Upright, new Vector3(0.22f, 0.27f, 0.25f), 0.1f, paint, false);
+                    Box("Shades", H, At(0f, 1.675f, 0.118f), Upright, new Vector3(0.19f, 0.04f, 0.035f), 0.012f, joint, false);
+                    Box("ShadeGlint", H, At(0.045f, 1.678f, 0.137f), Upright, new Vector3(0.05f, 0.008f, 0.006f), 0.002f, glow, false);
+                    Box("ShadeGlint", H, At(-0.045f, 1.678f, 0.137f), Upright, new Vector3(0.05f, 0.008f, 0.006f), 0.002f, glow, false);
+                    Box("Earpiece", H, At(0.118f, 1.64f, 0.0f), Upright, new Vector3(0.02f, 0.03f, 0.03f), 0.01f, trim, false);
+                    Box("EarCoil", H, At(0.118f, 1.58f, -0.01f), Upright, new Vector3(0.008f, 0.1f, 0.008f), 0.003f, trim, false);
+                    break;
+                case ArmorStyle.Mender:
+                    Box("Helmet", H, At(0f, 1.67f, 0.0f), Upright, new Vector3(0.25f, 0.27f, 0.27f), 0.11f, paint, false);
+                    Box("Visor", H, At(0f, 1.655f, 0.125f), Upright, new Vector3(0.17f, 0.08f, 0.04f), 0.03f, glow, false);
+                    Box("BrowCrossV", H, At(0f, 1.78f, 0.1f), Upright, new Vector3(0.02f, 0.06f, 0.02f), 0.004f, trim, false);
+                    Box("BrowCrossH", H, At(0f, 1.78f, 0.1f), Upright, new Vector3(0.06f, 0.02f, 0.02f), 0.004f, trim, false);
+                    break;
                 default:
                     Box("Helm", H, At(0f, 1.66f, 0.0f), Upright, new Vector3(0.27f, 0.27f, 0.3f), 0.08f, paint, false);
                     Box("Visor", H, At(0f, 1.665f, 0.135f), Upright, new Vector3(0.2f, 0.045f, 0.05f), 0.016f, glow, false);
@@ -272,7 +322,7 @@ namespace HackAndSlash
                     }
                     break;
             }
-            if (st != ArmorStyle.Hexer)
+            if (st != ArmorStyle.Hexer && st != ArmorStyle.Auditor)
             {
                 Box("EarL", H, At(0.135f, 1.65f, 0f), Upright, new Vector3(0.045f, 0.1f, 0.1f), 0.02f, trim, false);
                 Box("EarR", H, At(-0.135f, 1.65f, 0f), Upright, new Vector3(0.045f, 0.1f, 0.1f), 0.02f, trim, false);
@@ -534,6 +584,13 @@ namespace HackAndSlash
                 if (old) Destroy(old.gameObject);
             }
             return rb;
+        }
+
+        /// <summary>Sweeps every piece of debris away (district changes, checkpoints).</summary>
+        public static void ClearAll()
+        {
+            foreach (var d in live.ToArray()) if (d) Destroy(d.gameObject);
+            live.Clear();
         }
 
         void Update()

@@ -3,7 +3,8 @@ using UnityEngine;
 namespace HackAndSlash
 {
     /// <summary>
-    /// Procedurally synthesised sound effects (no audio files needed) plus music playback.
+    /// Procedurally synthesised sound effects (no audio files needed): combat, gadgets, UI, the radio, the midnight
+    /// bell, and the "voices" (HALCYON's clean sine blips, Wren's band-limited radio blips). The score is <see cref="Music"/>.
     /// </summary>
     public class Sfx : MonoBehaviour
     {
@@ -11,14 +12,16 @@ namespace HackAndSlash
 
         public AudioClip swing, swingHeavy, hit, hitHeavy, crit, clang, death, hurt, dash, nova, slam, spawn, cast, warn, drum, ting, charge;
         public AudioClip parry, stun, thunder, thunderFar, rain, takedown, thud, whoom, servo;
-        public AudioClip[] clatter;
+        public AudioClip rifle, blaster, tether, tetherHit, rip, glitch, typeKey, radioStatic, bell, uiMove, uiSelect, focusIn, focusOut;
+        public AudioClip[] clatter, halBlips, wrenBlips;
 
         const int SR = 44100;
         AudioSource[] pool;
         int next;
-        AudioSource musicSrc, rainSrc;
+        AudioSource rainSrc, uiSrc;
+        AudioLowPassFilter rainFilter;
         GameManager gm;
-        float lastClatter;
+        float lastClatter, rainTarget = 1f, rainCutoff = 22000f;
 
         public void Init(GameManager g)
         {
@@ -36,14 +39,20 @@ namespace HackAndSlash
                     s.spatialBlend = 0f;
                     pool[i] = s;
                 }
-                musicSrc = holder.AddComponent<AudioSource>();
-                musicSrc.loop = true;
-                musicSrc.playOnAwake = false;
-                musicSrc.volume = 0.3f;
-                rainSrc = holder.AddComponent<AudioSource>();
+                // menu blips must sound while the game (and AudioListener) is paused
+                uiSrc = holder.AddComponent<AudioSource>();
+                uiSrc.playOnAwake = false;
+                uiSrc.spatialBlend = 0f;
+                uiSrc.ignoreListenerPause = true;
+                // the rain gets its own object so a low-pass can muffle it indoors without touching anything else
+                var rainGo = new GameObject("Rain");
+                rainGo.transform.SetParent(transform, false);
+                rainSrc = rainGo.AddComponent<AudioSource>();
                 rainSrc.loop = true;
                 rainSrc.playOnAwake = false;
                 rainSrc.volume = 0.32f;
+                rainFilter = rainGo.AddComponent<AudioLowPassFilter>();
+                rainFilter.cutoffFrequency = 22000f;
             }
             if (swing == null) Generate();
             if (rain && !rainSrc.isPlaying)
@@ -51,38 +60,49 @@ namespace HackAndSlash
                 rainSrc.clip = rain;
                 rainSrc.Play();
             }
-            if (gm.music && !musicSrc.isPlaying)
-            {
-                musicSrc.clip = gm.music;
-                musicSrc.Play();
-            }
+        }
+
+        /// <summary>Rain bed level (0..1); muffled = heard through walls (the hotel).</summary>
+        public void SetRain(float level, bool muffled)
+        {
+            rainTarget = Mathf.Clamp01(level);
+            rainCutoff = muffled ? 700f : 22000f;
         }
 
         void OnDestroy()
         {
             if (I == this) I = null;
-            foreach (var c in new[] { swing, swingHeavy, hit, hitHeavy, crit, clang, death, hurt, dash, nova, slam, spawn, cast, warn, drum, ting, charge, parry, stun, thunder, thunderFar, rain, takedown, thud, whoom, servo })
+            foreach (var c in new[] { swing, swingHeavy, hit, hitHeavy, crit, clang, death, hurt, dash, nova, slam, spawn, cast, warn, drum, ting, charge, parry, stun, thunder, thunderFar, rain, takedown, thud, whoom, servo,
+                                      rifle, blaster, tether, tetherHit, rip, glitch, typeKey, radioStatic, bell, uiMove, uiSelect, focusIn, focusOut })
                 if (c) Destroy(c);
-            if (clatter != null) foreach (var c in clatter) if (c) Destroy(c);
+            foreach (var arr in new[] { clatter, halBlips, wrenBlips })
+                if (arr != null) foreach (var c in arr) if (c) Destroy(c);
         }
 
         void Update()
         {
-            if (musicSrc && gm)
+            float k = 1f - Mathf.Exp(-3f * Time.unscaledDeltaTime);
+            if (rainSrc)
             {
-                float target = gm.SlowMoScale < 0.6f ? 0.8f : 1f;
-                musicSrc.pitch = Mathf.Lerp(musicSrc.pitch, target, 1f - Mathf.Exp(-6f * Time.unscaledDeltaTime));
-                if (rainSrc) rainSrc.pitch = Mathf.Lerp(rainSrc.pitch, gm.SlowMoScale < 0.6f ? 0.55f : 1f, 1f - Mathf.Exp(-6f * Time.unscaledDeltaTime));
+                rainSrc.volume = Mathf.Lerp(rainSrc.volume, 0.32f * rainTarget * Settings.sfxVolume, k);
+                if (gm) rainSrc.pitch = Mathf.Lerp(rainSrc.pitch, gm.SlowMoScale < 0.6f ? 0.55f : 1f, 1f - Mathf.Exp(-6f * Time.unscaledDeltaTime));
             }
+            if (rainFilter) rainFilter.cutoffFrequency = Mathf.Lerp(rainFilter.cutoffFrequency, rainCutoff, k);
         }
 
         public static void Play(AudioClip c, float volume = 1f, float pitch = 1f, float pitchVar = 0.06f)
         {
             if (I == null || c == null || I.pool == null) return;
+            if (I.uiSrc && (c == I.uiMove || c == I.uiSelect))
+            {
+                I.uiSrc.pitch = pitch;
+                I.uiSrc.PlayOneShot(c, volume * Settings.sfxVolume);
+                return;
+            }
             var s = I.pool[I.next];
             I.next = (I.next + 1) % I.pool.Length;
             s.clip = c;
-            s.volume = volume;
+            s.volume = volume * Settings.sfxVolume;
             s.pitch = pitch * (1f + Random.Range(-pitchVar, pitchVar));
             s.Play();
         }
@@ -139,6 +159,280 @@ namespace HackAndSlash
             thud = Impact("thud", 0.35f, 90f, 40f, 16f, 0.7f, 40f, 29);
             whoom = Swell("whoom", 0.9f, 30);
             clatter = new[] { Metal("clatter0", 0.22f, new[] { 2210f, 3120f, 4630f }, 26f, 31), Metal("clatter1", 0.25f, new[] { 1680f, 2850f, 3970f }, 22f, 32), Metal("clatter2", 0.18f, new[] { 2950f, 4120f, 6020f }, 30f, 33) };
+            servo = Servo("servo", 0.45f, 34);
+            rifle = Gunshot("rifle", 0.4f, 95f, 1f, 35);
+            blaster = Blaster("blaster", 0.55f, 36);
+            tether = Tether("tether", 0.28f, 37);
+            tetherHit = Metal("tetherHit", 0.3f, new[] { 640f, 1530f, 2390f }, 14f, 38);
+            rip = Rip("rip", 0.55f, 39);
+            glitch = Glitch("glitch", 0.55f, 40);
+            typeKey = TypeKey("typeKey", 0.05f, 41);
+            radioStatic = RadioStatic("radioStatic", 1.1f, 42);
+            bell = Bell("bell", 5.5f, 43);
+            uiMove = Tone("uiMove", 0.045f, 2350f, 0f, 90f);
+            uiSelect = Tone("uiSelect", 0.2f, 880f, 1320f, 18f);
+            focusIn = Sweep("focusIn", 0.6f, 900f, 90f, 44);
+            focusOut = Sweep("focusOut", 0.45f, 120f, 1100f, 45);
+            float[] hal = { 430f, 465f, 505f, 540f, 585f, 620f };
+            halBlips = new AudioClip[hal.Length];
+            for (int i = 0; i < hal.Length; i++) halBlips[i] = HalBlip("hal" + i, 0.075f, hal[i]);
+            float[] wren = { 250f, 280f, 310f, 335f, 370f, 400f };
+            wrenBlips = new AudioClip[wren.Length];
+            for (int i = 0; i < wren.Length; i++) wrenBlips[i] = WrenBlip("wren" + i, 0.065f, wren[i], (uint)(50 + i));
+        }
+
+        // ---- combat & gadgets
+
+        static AudioClip Servo(string name, float dur, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 2654435761u + 7u;
+            float phase = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR, u = t / dur;
+                float f = Mathf.Lerp(380f, 620f, Mathf.Sin(u * Mathf.PI));
+                phase += f / SR;
+                float saw = (phase % 1f) * 2f - 1f;
+                d[i] = (saw * 0.5f + Noise(ref rng) * 0.08f) * Mathf.Sin(Mathf.PI * u) * (0.75f + 0.25f * Mathf.Sin(t * 90f));
+            }
+            return Make(name, d);
+        }
+
+        static AudioClip Gunshot(string name, float dur, float body, float crack, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 1664525u + 1013904223u;
+            float lp = 0f, lp2 = 0f, phase = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR;
+                float n = Noise(ref rng);
+                lp += (n - lp) * 0.35f;
+                lp2 += (n - lp2) * 0.04f;
+                float hi = (n - lp) * crack * Mathf.Exp(-t * 70f);
+                phase += 2f * Mathf.PI * (body + 60f * Mathf.Exp(-t * 40f)) / SR;
+                float thump = Mathf.Sin(phase) * Mathf.Exp(-t * 26f);
+                float room = lp2 * 2.2f * Mathf.Exp(-t * 7f);
+                d[i] = Tanh((hi * 1.6f + thump * 1.3f + room) * 2f);
+            }
+            return Make(name, d);
+        }
+
+        static AudioClip Blaster(string name, float dur, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 22695477u + 1u;
+            float phase = 0f, sub = 0f, lp = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR;
+                float f = 110f + 1500f * Mathf.Exp(-t * 22f);
+                phase += f / SR;
+                float sq = (phase % 1f) < 0.5f ? 1f : -1f;
+                sub += 2f * Mathf.PI * (55f + 40f * Mathf.Exp(-t * 15f)) / SR;
+                float n = Noise(ref rng);
+                lp += (n - lp) * 0.2f;
+                float v = sq * 0.35f * Mathf.Exp(-t * 9f) + Mathf.Sin(phase * 2f * Mathf.PI) * 0.5f * Mathf.Exp(-t * 7f)
+                        + Mathf.Sin(sub) * 1.1f * Mathf.Exp(-t * 11f) + lp * 1.2f * Mathf.Exp(-t * 30f);
+                d[i] = Tanh(v * 1.8f);
+            }
+            return Make(name, d);
+        }
+
+        static AudioClip Tether(string name, float dur, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 69069u + 1u;
+            float low = 0f, band = 0f, phase = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR, u = t / dur;
+                float fc = Mathf.Lerp(700f, 5200f, u);
+                float f = 2f * Mathf.Sin(Mathf.PI * fc / SR);
+                float high = Noise(ref rng) - low - 0.35f * band;
+                band += f * high;
+                low += f * band;
+                phase += 2f * Mathf.PI * Mathf.Lerp(260f, 1300f, u * u) / SR;
+                float env = Mathf.Sin(Mathf.PI * Mathf.Pow(u, 0.4f));
+                d[i] = (band * 0.7f + Mathf.Sin(phase) * 0.45f) * env;
+            }
+            return Make(name, d);
+        }
+
+        static AudioClip Rip(string name, float dur, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 1103515245u + 12345u;
+            float lp = 0f, gate = 0f;
+            int period = 900;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR;
+                if (i % period == 0) { gate = 0.4f + 0.6f * Mathf.Abs(Noise(ref rng)); period = Mathf.Max(220, period - 40); }
+                float n = Noise(ref rng);
+                lp += (n - lp) * 0.5f;
+                float tear = lp * gate * Mathf.Exp(-((i % period) / (float)period) * 5f);
+                float ring = (Mathf.Sin(2f * Mathf.PI * 1250f * t) + Mathf.Sin(2f * Mathf.PI * 2210f * t) * 0.6f + Mathf.Sin(2f * Mathf.PI * 3390f * t) * 0.3f) * 0.25f * Mathf.Exp(-t * 6f);
+                float pop = t > dur * 0.72f ? Noise(ref rng) * Mathf.Exp(-(t - dur * 0.72f) * 40f) * 1.4f : 0f;
+                d[i] = Tanh((tear * 1.6f + ring + pop) * 1.5f) * Mathf.Min(1f, (dur - t) * 20f);
+            }
+            return Make(name, d);
+        }
+
+        static AudioClip Sweep(string name, float dur, float f0, float f1, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 7u + 3u;
+            float phase = 0f, lp = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR, u = t / dur;
+                float f = Mathf.Lerp(f0, f1, 1f - (1f - u) * (1f - u));
+                phase += 2f * Mathf.PI * f / SR;
+                lp += (Noise(ref rng) - lp) * 0.05f;
+                float env = Mathf.Sin(Mathf.PI * u);
+                d[i] = (Mathf.Sin(phase) * 0.7f + Mathf.Sin(phase * 0.5f) * 0.5f + lp * 2f) * env * env;
+            }
+            return Make(name, d);
+        }
+
+        // ---- the story's sounds
+
+        static AudioClip Glitch(string name, float dur, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 2891336453u + 1u;
+            int segEnd = 0, mode = 0, hold = 1;
+            float freq = 440f, phase = 0f, held = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                if (i >= segEnd)
+                {
+                    segEnd = i + (int)(SR * (0.012f + 0.05f * Mathf.Abs(Noise(ref rng))));
+                    mode = (int)(Mathf.Abs(Noise(ref rng)) * 4f);
+                    freq = 150f + 2400f * Mathf.Abs(Noise(ref rng));
+                    hold = 1 + (int)(Mathf.Abs(Noise(ref rng)) * 24f);
+                }
+                phase += freq / SR;
+                float v;
+                switch (mode)
+                {
+                    case 0: v = (phase % 1f) < 0.5f ? 0.8f : -0.8f; break;
+                    case 1: v = Noise(ref rng); break;
+                    case 2: v = Mathf.Sin(phase * 2f * Mathf.PI) * 0.9f; break;
+                    default: v = 0f; break;
+                }
+                if (i % hold == 0) held = Mathf.Round(v * 4f) / 4f; // decimate + bitcrush
+                d[i] = held * (1f - i / (float)d.Length * 0.5f);
+            }
+            return Make(name, d);
+        }
+
+        static AudioClip TypeKey(string name, float dur, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 747796405u + 1u;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR;
+                d[i] = Noise(ref rng) * Mathf.Exp(-t * 420f) + Mathf.Sin(2f * Mathf.PI * 1850f * t) * 0.5f * Mathf.Exp(-t * 130f);
+            }
+            return Make(name, d);
+        }
+
+        static AudioClip RadioStatic(string name, float dur, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 2246822519u + 1u;
+            float low = 0f, band = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR, u = t / dur;
+                float f = 2f * Mathf.Sin(Mathf.PI * 1900f / SR);
+                float high = Noise(ref rng) - low - 0.9f * band;
+                band += f * high;
+                low += f * band;
+                float crackle = Noise(ref rng) > 0.996f ? Noise(ref rng) * 3f : 0f;
+                float whistle = Mathf.Sin(2f * Mathf.PI * (1650f + 120f * Mathf.Sin(t * 3f)) * t) * 0.08f;
+                float env = Mathf.Min(1f, u * 12f) * Mathf.Min(1f, (1f - u) * 6f);
+                d[i] = (band * 0.8f + crackle + whistle) * env;
+            }
+            return Make(name, d);
+        }
+
+        /// <summary>A low tower bell (inharmonic partials of a real church bell), for the twelve strokes of midnight.</summary>
+        static AudioClip Bell(string name, float dur, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 1597334677u + 1u;
+            float[] ratio = { 0.5f, 1f, 1.183f, 1.506f, 2f, 2.514f, 2.662f, 3.011f, 4.166f };
+            float[] amp = { 0.9f, 0.7f, 0.55f, 0.35f, 0.4f, 0.22f, 0.18f, 0.15f, 0.08f };
+            float[] dec = { 0.45f, 0.6f, 0.9f, 1.1f, 1.2f, 1.8f, 2.2f, 2.6f, 3.5f };
+            const float f0 = 196f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR;
+                float v = 0f;
+                for (int k = 0; k < ratio.Length; k++)
+                {
+                    float beat = 1f + 0.002f * k * Mathf.Sin(t * (1.3f + k));
+                    v += Mathf.Sin(2f * Mathf.PI * f0 * ratio[k] * beat * t + k) * amp[k] * Mathf.Exp(-t * dec[k]);
+                }
+                v += Noise(ref rng) * Mathf.Exp(-t * 80f) * 0.5f;
+                d[i] = Tanh(v * 0.9f);
+            }
+            return Make(name, d);
+        }
+
+        /// <summary>HALCYON's voice: clean, calm sine blips with a soft second partial (it is very polite).</summary>
+        static AudioClip HalBlip(string name, float dur, float f)
+        {
+            var d = new float[(int)(dur * SR)];
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR, u = t / dur;
+                float env = Mathf.Min(1f, t * 200f) * (1f - u) * (1f - u);
+                d[i] = (Mathf.Sin(2f * Mathf.PI * f * t) + Mathf.Sin(2f * Mathf.PI * f * 2f * t) * 0.22f + Mathf.Sin(2f * Mathf.PI * f * 3.01f * t) * 0.06f) * env;
+            }
+            return Make(name, d);
+        }
+
+        /// <summary>Wren's voice: a warm detuned saw, band-limited like an old radio, with a little hiss.</summary>
+        static AudioClip WrenBlip(string name, float dur, float f, uint seed)
+        {
+            var d = new float[(int)(dur * SR)];
+            uint rng = seed * 1013904223u + 1u;
+            float p1 = 0f, p2 = 0f, low = 0f, band = 0f;
+            float fc = 2f * Mathf.Sin(Mathf.PI * 1250f / SR);
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR, u = t / dur;
+                float vib = 1f + 0.015f * Mathf.Sin(t * 38f);
+                p1 += f * vib / SR; p2 += f * 1.007f * vib / SR;
+                float x = ((p1 % 1f) * 2f - 1f) * 0.5f + ((p2 % 1f) * 2f - 1f) * 0.5f + Noise(ref rng) * 0.12f;
+                float high = x - low - 0.6f * band;
+                band += fc * high;
+                low += fc * band;
+                float env = Mathf.Min(1f, t * 250f) * (1f - u);
+                d[i] = Tanh(band * 2.2f) * env;
+            }
+            return Make(name, d);
+        }
+
+        static AudioClip Tone(string name, float dur, float f0, float f1, float decay)
+        {
+            var d = new float[(int)(dur * SR)];
+            float phase = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = i / (float)SR, u = t / dur;
+                float f = f1 > 0f ? (u < 0.45f ? f0 : f1) : f0;
+                phase += 2f * Mathf.PI * f / SR;
+                float local = f1 > 0f ? (u < 0.45f ? t : t - dur * 0.45f) : t;
+                d[i] = (Mathf.Sin(phase) + Mathf.Sin(phase * 2f) * 0.2f) * Mathf.Exp(-local * decay) * Mathf.Min(1f, local * 400f);
+            }
+            return Make(name, d);
         }
 
         static AudioClip Crackle(string name, float dur, uint seed)

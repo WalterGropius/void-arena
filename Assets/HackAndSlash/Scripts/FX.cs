@@ -84,6 +84,8 @@ namespace HackAndSlash
             dmgTextMat = null;
             if (fallbackLit) Object.Destroy(fallbackLit);
             fallbackLit = null;
+            if (smokeMat) Object.Destroy(smokeMat);
+            smokeMat = null;
             MeshKit.ClearCache();
         }
 
@@ -389,6 +391,22 @@ namespace HackAndSlash
             go.AddComponent<ArcFX>().Init(lr, a, b, c, life, follow);
         }
 
+        /// <summary>A bullet's streak of light: a thin line that fades out over a few frames.</summary>
+        public static void Tracer(Vector3 a, Vector3 b, Color c, float width = 0.04f, float life = 0.08f)
+        {
+            var go = NewObject("FX_Tracer");
+            var lr = go.AddComponent<LineRenderer>();
+            lr.sharedMaterial = flat;
+            lr.shadowCastingMode = ShadowCastingMode.Off;
+            lr.receiveShadows = false;
+            lr.positionCount = 2;
+            lr.SetPosition(0, a);
+            lr.SetPosition(1, b);
+            lr.widthCurve = new AnimationCurve(new Keyframe(0f, 0.25f), new Keyframe(1f, 1f));
+            lr.widthMultiplier = width;
+            go.AddComponent<TracerFX>().Init(lr, c, life);
+        }
+
         /// <summary>Puff of grit where a robot lands or slams the floor.</summary>
         public static void Dust(Vector3 pos, float scale)
         {
@@ -488,6 +506,90 @@ namespace HackAndSlash
             r.shadowCastingMode = ShadowCastingMode.Off;
             r.receiveShadows = false;
             ps.Play();
+            return ps;
+        }
+
+        static Material smokeMat;
+
+        /// <summary>Alpha-blended smoke material (generated puff texture on the sprite shader).</summary>
+        public static Material SmokeMat
+        {
+            get
+            {
+                if (smokeMat) return smokeMat;
+                var tex = TexLibrary.Tex("Smoke");
+                smokeMat = new Material(flat ? flat : glow) { name = "FX_Smoke" };
+                if (tex) smokeMat.mainTexture = tex;
+                return smokeMat;
+            }
+        }
+
+        /// <summary>A slow column of smoke rising from a ruin (or a cloud bank when huge and low).</summary>
+        public static ParticleSystem SmokePlume(Transform parent, Vector3 pos, float size, Color color)
+        {
+            var go = new GameObject("Smoke");
+            go.transform.SetParent(parent, false);
+            go.transform.position = pos;
+            go.transform.rotation = Quaternion.Euler(-90f, 0f, 0f);
+            var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var main = ps.main;
+            main.loop = true;
+            main.prewarm = true;
+            main.duration = 6f;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(10f, 16f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(size * 0.25f, size * 0.5f);
+            main.startSize = new ParticleSystem.MinMaxCurve(size * 0.8f, size * 1.5f);
+            main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+            main.startColor = new ParticleSystem.MinMaxGradient(color, color * 0.8f);
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.maxParticles = 40;
+            var em = ps.emission;
+            em.rateOverTime = 2.6f;
+            var sh = ps.shape;
+            sh.shapeType = ParticleSystemShapeType.Cone;
+            sh.angle = 8f;
+            sh.radius = size * 0.3f;
+            var sol = ps.sizeOverLifetime;
+            sol.enabled = true;
+            sol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0f, 0.4f), new Keyframe(1f, 3f)));
+            var rol = ps.rotationOverLifetime;
+            rol.enabled = true;
+            rol.z = new ParticleSystem.MinMaxCurve(-0.2f, 0.2f);
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            var g = new Gradient();
+            g.SetKeys(new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+                new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(1f, 0.15f), new GradientAlphaKey(0.6f, 0.6f), new GradientAlphaKey(0f, 1f) });
+            col.color = new ParticleSystem.MinMaxGradient(g);
+            var vel = ps.velocityOverLifetime;
+            vel.enabled = true;
+            vel.space = ParticleSystemSimulationSpace.World;
+            vel.x = new ParticleSystem.MinMaxCurve(-1.5f, -0.5f);
+            vel.y = new ParticleSystem.MinMaxCurve(0f, 0.3f);
+            vel.z = new ParticleSystem.MinMaxCurve(0.2f, 0.9f);
+            var r = go.GetComponent<ParticleSystemRenderer>();
+            r.sharedMaterial = SmokeMat;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            ps.Play();
+            return ps;
+        }
+
+        /// <summary>Steam venting from a manhole or an HVAC stack.</summary>
+        public static ParticleSystem Steam(Transform parent, Vector3 pos, float size)
+        {
+            var ps = SmokePlume(parent, pos, size, new Color(0.62f, 0.64f, 0.7f, 0.16f));
+            var main = ps.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(2.5f, 4.5f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.8f, 1.6f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.8f * size, 1.8f * size);
+            main.maxParticles = 60;
+            var em = ps.emission;
+            em.rateOverTime = 8f;
+            var sh = ps.shape;
+            sh.angle = 12f;
+            sh.radius = 0.3f * size;
             return ps;
         }
 
@@ -816,6 +918,29 @@ namespace HackAndSlash
             transform.localScale = new Vector3(size.x * (0.6f + 0.4f * k), size.y * k, 1f);
             var c = color; c.a = k * k;
             FX.SetColor(mr, c);
+            if (u >= 1f) Destroy(gameObject);
+        }
+    }
+
+    public class TracerFX : MonoBehaviour
+    {
+        LineRenderer lr;
+        Color color;
+        float life, age, width;
+
+        public void Init(LineRenderer line, Color c, float l)
+        {
+            lr = line; color = c; life = l; width = line.widthMultiplier;
+            FX.SetColor(lr, c);
+        }
+
+        void Update()
+        {
+            age += Time.unscaledDeltaTime * 0.5f + Time.deltaTime * 0.5f;
+            float u = Mathf.Clamp01(age / life);
+            var c = color; c.a = color.a * (1f - u);
+            FX.SetColor(lr, c);
+            lr.widthMultiplier = width * (1f - 0.6f * u);
             if (u >= 1f) Destroy(gameObject);
         }
     }

@@ -12,14 +12,16 @@ using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// Builds the Void Arena scene from scratch: a rain-soaked skyscraper rooftop above a procedural night city, lit by
-/// an HDRI sky, floodlights and neon, with wet planar reflections, photographic post-processing, the player rig and
-/// the managers. Every visual is generated here or at runtime; see README for the CC0 texture sources.
+/// Builds the VOID KNIGHT scene from scratch: the hand-built rain-soaked helipad rooftop (the prologue's stage,
+/// switched on only in the Rooftop district), HDRI sky, floodlights and neon, wet planar reflections, photographic
+/// post-processing, the player rig and the managers, plus the template materials the runtime city generator
+/// (<see cref="CityGen"/>) and the procedural texture library (<see cref="TexLibrary"/>) build on. The city itself,
+/// every other district, the music and the sound are generated at runtime; see README for the CC0 texture sources.
 /// </summary>
 public static class HackSlashBuilder
 {
     /// <summary>Bump whenever the generated scene changes; stale scenes are rebuilt automatically before Play.</summary>
-    public const int Version = 2;
+    public const int Version = 3;
 
     const string Root = "Assets/HackAndSlash";
     const string ScenePath = Root + "/Scenes/VoidArena.unity";
@@ -74,7 +76,6 @@ public static class HackSlashBuilder
         var tMetA = Tex("T_MetalPanel_Albedo.jpg"); var tMetN = Tex("T_MetalPanel_Normal.jpg", normal: true); var tMetMS = Tex("T_MetalPanel_MetalSmooth.png", linear: true); var tMetAO = Tex("T_MetalPanel_AO.jpg", linear: true);
         var tTreadA = Tex("T_TreadPlate_Albedo.jpg"); var tTreadN = Tex("T_TreadPlate_Normal.jpg", normal: true); var tTreadMS = Tex("T_TreadPlate_MetalSmooth.png", linear: true);
         var tFacA = Tex("T_Facade_Albedo.jpg"); var tFacE = Tex("T_Facade_Emission.jpg"); var tFacMS = Tex("T_Facade_MetalSmooth.png", linear: true);
-        var tGrid = Tex("T_CityGrid_Emission.jpg");
         var tDirt = Tex("T_LensDirt.jpg");
         var tSpider = Tex("T_SpiderSense.png", alpha: true, maxSize: 512);
         var tRipple = Tex("T_Ripple.png", alpha: true, maxSize: 128);
@@ -95,8 +96,6 @@ public static class HackSlashBuilder
         var mMetalPanel = SaveMat("M_MetalPanel", PBR(lit, new Color(0.7f, 0.72f, 0.78f), tMetA, tMetN, 1f, tMetMS, 1f, tMetAO, Vector2.one));
         var mTread = SaveMat("M_TreadPlate", PBR(lit, new Color(0.55f, 0.55f, 0.6f), tTreadA, tTreadN, 1f, tTreadMS, 1f, null, Vector2.one));
         var mFacade = SaveMat("M_Facade", PBR(lit, Color.white, tFacA, null, 1f, tFacMS, 1f, null, Vector2.one, new Color(1.7f, 1.6f, 1.5f), tFacE));
-        var mGrid = SaveMat("M_CityGrid", PBR(lit, Color.black, null, null, 1f, null, 0.2f, null, new Vector2(22f, 22f), new Color(2.4f, 2.2f, 2f), tGrid));
-        mGrid.SetTexture("_BaseMap", tGrid); mGrid.SetTextureScale("_BaseMap", new Vector2(22f, 22f));
         var mHeli = PBR(lit, Color.white, tHeli, null, 1f, null, 0.82f, null, Vector2.one);
         Transparent(mHeli, 2920);
         mHeli = SaveMat("M_Helipad", mHeli);
@@ -114,6 +113,20 @@ public static class HackSlashBuilder
         var mNeonAmber = SaveMat("M_NeonAmber", PBR(lit, Color.black, null, null, 1f, null, 0.8f, null, Vector2.one, new Color(4.2f, 1.6f, 0.3f)));
         var mGlowRing = SaveMat("M_InnerGlow", PBR(lit, Color.black, null, null, 1f, null, 0.5f, null, Vector2.one, new Color(0.25f, 1.0f, 2.4f)));
         var mSpawn = SaveMat("M_SpawnGlow", PBR(lit, Color.black, null, null, 1f, null, 0.5f, null, Vector2.one, new Color(0.7f, 0.07f, 0.04f)));
+
+        // runtime templates: the generated city and texture library copy these (keywords set so the variants exist)
+        var mCityTpl = SaveMat("M_CityTemplate", CityTemplate(false, false));
+        var mCityEmissive = SaveMat("M_CityTemplate_Emissive", CityTemplate(true, false));
+        var mCityCutout = SaveMat("M_CityTemplate_Cutout", CityTemplate(false, true));
+        var mCloth = CityTemplate(false, true);
+        mCloth.SetColor("_BaseColor", new Color(0.07f, 0.07f, 0.08f));
+        mCloth.DisableKeyword("_NORMALMAP"); mCloth.DisableKeyword("_METALLICSPECGLOSSMAP"); mCloth.DisableKeyword("_OCCLUSIONMAP");
+        mCloth.SetFloat("_Smoothness", 0.3f);
+        mCloth = SaveMat("M_Cloth", mCloth);
+        var holoShader = Shader.Find("VoidArena/Hologram");
+        var mHolo = SaveMat("M_Hologram", new Material(holoShader ? holoShader : sprite));
+        var rainShader = Shader.Find("VoidArena/DigitalRain");
+        var mRain = SaveMat("M_DigitalRain", new Material(rainShader ? rainShader : sprite));
 
         var armorPaint = new Material(complexLit) { name = "M_ArmorPaint" };
         armorPaint.SetColor("_BaseColor", Color.white);
@@ -156,11 +169,7 @@ public static class HackSlashBuilder
         var ringGlow = SaveMesh(Annulus("Mesh_HelipadRing", 7.55f, 7.68f, 128, 1f));
         var spawnRing = SaveMesh(Annulus("Mesh_SpawnRing", 0.9f, 1.04f, 48, 1f));
         var beamMesh = SaveMesh(MeshKit.Cone(0.3f, 5.2f, 24f, 24, "Mesh_Floodbeam"));
-        var skyBeamMesh = SaveMesh(MeshKit.Cone(1.2f, 22f, 420f, 24, "Mesh_Searchbeam"));
         var signBeamMesh = SaveMesh(MeshKit.Cone(0.2f, 3.5f, 60f, 16, "Mesh_SignBeam"));
-        BuildCity(out var cityMesh, out var neonMeshes, out var beaconSpots, out var searchSpots);
-        cityMesh = SaveMesh(cityMesh);
-        for (int i = 0; i < neonMeshes.Length; i++) neonMeshes[i] = SaveMesh(neonMeshes[i]);
 
         // ------------------------------------------------------------ scene
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
@@ -237,45 +246,13 @@ public static class HackSlashBuilder
         BuildFloodlights(arena, mDark, mLampFace, mBeam, beamMesh);
         BuildBillboard(arena, mDark, mNeonPink, mNeonCyan, mBeamNeon, signBeamMesh);
 
-        // ---- the city
-        var city = new GameObject("City").transform;
-        MeshObj("Skyline", city, cityMesh, mFacade, 0f, false).layer = Layers.Environment;
-        var neonMats = new[] { mNeonPink, mNeonCyan, mNeonAmber };
-        for (int i = 0; i < neonMeshes.Length; i++) MeshObj("Neon_" + i, city, neonMeshes[i], neonMats[i % neonMats.Length], 0f, false);
-        var ground = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        ground.name = "StreetGrid";
-        Object.DestroyImmediate(ground.GetComponent<Collider>());
-        ground.transform.SetParent(city, false);
-        ground.transform.localPosition = new Vector3(0f, -190f, 0f);
-        ground.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-        ground.transform.localScale = new Vector3(1400f, 1400f, 1f);
-        ground.GetComponent<MeshRenderer>().sharedMaterial = mGrid;
-        ground.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+        // the city around the tower is generated at runtime (CityGen), like every other district
         var beacons = new List<Renderer>(propBeacons);
-        foreach (var p in beaconSpots)
-        {
-            var b = Prim(PrimitiveType.Sphere, "Beacon", city, p, Vector3.one * 1.1f, mBeacon, false);
-            b.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
-            beacons.Add(b.GetComponent<MeshRenderer>());
-        }
-        foreach (var p in searchSpots)
-        {
-            var s = new GameObject("Searchlight").transform;
-            s.SetParent(city, false);
-            s.position = p;
-            s.rotation = Quaternion.Euler(-70f - Rand(0f, 12f), Rand(0f, 360f), 0f);
-            MeshObj("Beam", s, skyBeamMesh, mBeam, 0f, false).transform.localScale = Vector3.one;
-            var sw = s.gameObject.AddComponent<Sweeper>();
-            sw.yawAmplitude = Rand(25f, 50f);
-            sw.yawSpeed = Rand(0.03f, 0.07f);
-            sw.pitchAmplitude = Rand(5f, 12f);
-        }
-        AirTraffic(city, mGlow);
         SetLayerRecursive(arena, Layers.Environment, Layers.Floor, Layers.Water);
-        SetLayerRecursive(city, Layers.Environment, Layers.Floor, Layers.Water);
 
         // spawn landing pads
         var spawnRoot = new GameObject("SpawnPoints").transform;
+        spawnRoot.SetParent(arena, false);
         var spawnPoints = new List<Transform>();
         for (int i = 0; i < 8; i++)
         {
@@ -326,6 +303,7 @@ public static class HackSlashBuilder
         vol.isGlobal = true;
         vol.priority = 1f;
         vol.sharedProfile = profile;
+        // the post profile is retuned per district at runtime (on an instanced copy)
 
         var hitProfile = NewProfile("VP_HitPulse");
         AddVC<ChromaticAberration>(hitProfile).intensity.value = 1f;
@@ -435,6 +413,10 @@ public static class HackSlashBuilder
         gm.hitVolume = hitVol;
         gm.cinematicVolume = cineVol;
         gm.environment = env;
+        gm.weather = weather;
+        gm.moon = moon;
+        gm.mainVolume = vol;
+        gm.rooftopRoot = arena.gameObject;
         gm.builderVersion = Version;
         gm.spawnPoints = spawnPoints.ToArray();
         gm.robotModel = AssetDatabase.LoadAssetAtPath<GameObject>(RobotFbx);
@@ -446,7 +428,27 @@ public static class HackSlashBuilder
         gm.trailMaterial = mFlat;
         gm.metalMaterial = mMetal;
         gm.spiderSenseMaterial = mSpider;
-        gm.music = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/SourceFiles/SoundFX/Music_Exciting.ogg");
+        gm.cityMaterial = mCityTpl;
+        gm.wetMaterial = mWet;
+        gm.holoMaterial = mHolo;
+        gm.rainMaterial = mRain;
+        gm.beamMaterial = mBeam;
+        gm.clothMaterial = mCloth;
+        // the score is synthesised at runtime (Music); no clip needed
+
+        // keep the runtime-only shader variants in builds: an inert object that references them
+        var keeper = new GameObject("ShaderVariantKeeper");
+        keeper.SetActive(false);
+        foreach (var m in new[] { mCityTpl, mCityEmissive, mCityCutout, mCloth, mHolo, mRain })
+        {
+            var k = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            Object.DestroyImmediate(k.GetComponent<Collider>());
+            k.name = m.name;
+            k.transform.SetParent(keeper.transform, false);
+            var kr = k.GetComponent<MeshRenderer>();
+            kr.sharedMaterial = m;
+            kr.enabled = false;
+        }
         gm.pickupClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/SourceFiles/SoundFX/SFX_PositiveSound01.ogg");
         var steps = new List<AudioClip>();
         for (int i = 1; i <= 10; i++)
@@ -461,7 +463,7 @@ public static class HackSlashBuilder
         AssetDatabase.SaveAssets();
         Selection.activeGameObject = player;
         if (SceneView.lastActiveSceneView) SceneView.lastActiveSceneView.FrameSelected();
-        Debug.Log("[Hack & Slash] Void Arena (builder v" + Version + ") built at " + ScenePath + ". Press Play (or Hack & Slash > Play Void Arena).");
+        Debug.Log("[Hack & Slash] VOID KNIGHT (builder v" + Version + ") built at " + ScenePath + ". Press Play (or Hack & Slash > Play Void Arena).");
     }
 
     // ---------------------------------------------------------------- stale-scene guard
@@ -744,7 +746,7 @@ public static class HackSlashBuilder
         textGo.transform.localPosition = new Vector3(0f, 0.35f, 0.3f);
         textGo.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
         var tmp = textGo.AddComponent<TextMeshPro>();
-        tmp.text = "VOID ARENA";
+        tmp.text = "HALCYON";
         tmp.fontSize = 42f;
         tmp.alignment = TextAlignmentOptions.Center;
         tmp.fontStyle = FontStyles.Bold;
@@ -767,7 +769,7 @@ public static class HackSlashBuilder
         sub.transform.localPosition = new Vector3(0f, -2.3f, 0.3f);
         sub.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
         var t2 = sub.AddComponent<TextMeshPro>();
-        t2.text = "ROBOTICS  ·  DEMOLITION  ·  24/7";
+        t2.text = "IT IS ALWAYS 11:59  ·  PLEASE REMAIN STILL";
         t2.fontSize = 12f;
         t2.alignment = TextAlignmentOptions.Center;
         t2.characterSpacing = 12f;
@@ -797,98 +799,6 @@ public static class HackSlashBuilder
             sw.yawAmplitude = 18f; sw.yawSpeed = 0.11f; sw.pitchAmplitude = 6f;
         }
     }
-
-    /// <summary>Procedural night skyline: towers with lit windows (world-scale UVs), neon strips, beacons and searchlights.</summary>
-    static void BuildCity(out Mesh city, out Mesh[] neon, out List<Vector3> beacons, out List<Vector3> searchlights)
-    {
-        var b = new MeshKit.Builder();
-        var neonB = new[] { new MeshKit.Builder(), new MeshKit.Builder(), new MeshKit.Builder() };
-        beacons = new List<Vector3>();
-        searchlights = new List<Vector3>();
-        const float baseY = -190f;
-        int count = 0;
-        for (int ringI = 0; ringI < 4; ringI++)
-        {
-            float rMin = 48f + ringI * 55f, rMax = rMin + 50f;
-            int n = 14 + ringI * 8;
-            for (int i = 0; i < n; i++)
-            {
-                float a = (i + Rand(-0.35f, 0.35f)) / n * 360f;
-                var d = Quaternion.Euler(0f, a, 0f) * Vector3.forward;
-                float r = Rand(rMin, rMax);
-                float w = Rand(14f, 30f) * (1f + ringI * 0.2f), dpt = Rand(14f, 30f) * (1f + ringI * 0.2f);
-                float top = Rand(-45f, 40f) + (ringI >= 1 ? Rand(0f, 110f) : 0f) + (Rand(0f, 1f) < 0.15f ? 80f : 0f);
-                float h = top - baseY;
-                Vector3 c = d * r + Vector3.up * (baseY + h * 0.5f);
-                float yaw = a + Rand(-20f, 20f);
-                b.Box(c, new Vector3(w, h, dpt), yaw, new Vector2(12f, 14f), new Vector2(Mathf.Floor(Rand(0f, 4f)) * 0.25f, Mathf.Floor(Rand(0f, 4f)) * 0.25f));
-                // setback crown on taller towers
-                if (top > 40f && Rand(0f, 1f) < 0.6f)
-                {
-                    float cw = w * Rand(0.5f, 0.75f), cd = dpt * Rand(0.5f, 0.75f), ch = Rand(10f, 30f);
-                    b.Box(d * r + Vector3.up * (top + ch * 0.5f), new Vector3(cw, ch, cd), yaw, new Vector2(12f, 14f), Vector2.zero);
-                    top += ch;
-                }
-                if (top > 20f && Rand(0f, 1f) < 0.55f) beacons.Add(d * r + Vector3.up * (top + 1.2f));
-                if (Rand(0f, 1f) < 0.45f)
-                {
-                    // neon strips: vertical edge lights or a horizontal band near the top
-                    var nb = neonB[count % 3];
-                    var rot = Quaternion.Euler(0f, yaw, 0f);
-                    if (Rand(0f, 1f) < 0.5f)
-                    {
-                        Vector3 corner = d * r + rot * new Vector3(w * 0.5f + 0.15f, 0f, -dpt * 0.5f - 0.15f);
-                        nb.Box(new Vector3(corner.x, top - 30f, corner.z), new Vector3(0.5f, 60f, 0.5f), yaw, new Vector2(1f, 1f), Vector2.zero);
-                    }
-                    else
-                    {
-                        nb.Box(d * r + Vector3.up * (top - Rand(4f, 10f)), new Vector3(w + 0.6f, 1.2f, dpt + 0.6f), yaw, new Vector2(1f, 1f), Vector2.zero, false);
-                    }
-                }
-                if (ringI >= 1 && top > 60f && searchlights.Count < 5 && Rand(0f, 1f) < 0.3f) searchlights.Add(d * r + Vector3.up * (top + 2f));
-                count++;
-            }
-        }
-        city = b.ToMesh("Mesh_Skyline");
-        neon = new[] { neonB[0].ToMesh("Mesh_NeonPink"), neonB[1].ToMesh("Mesh_NeonCyan"), neonB[2].ToMesh("Mesh_NeonAmber") };
-    }
-
-    static void AirTraffic(Transform parent, Material glow)
-    {
-        var go = new GameObject("AirTraffic");
-        go.transform.SetParent(parent, false);
-        go.transform.localPosition = new Vector3(0f, 70f, 0f);
-        var ps = go.AddComponent<ParticleSystem>();
-        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-        var main = ps.main;
-        main.loop = true;
-        main.prewarm = true;
-        main.duration = 10f;
-        main.startLifetime = 40f;
-        main.startSpeed = 0f;
-        main.startSize = new ParticleSystem.MinMaxCurve(1.2f, 2.4f);
-        main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, 0.95f, 0.85f, 0.9f), new Color(1f, 0.3f, 0.2f, 0.9f));
-        main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.maxParticles = 120;
-        var em = ps.emission;
-        em.rateOverTime = 2.5f;
-        var sh = ps.shape;
-        sh.shapeType = ParticleSystemShapeType.Box;
-        sh.scale = new Vector3(40f, 50f, 700f);
-        sh.position = new Vector3(-320f, 0f, 0f);
-        var vel = ps.velocityOverLifetime;
-        vel.enabled = true;
-        vel.space = ParticleSystemSimulationSpace.World;
-        vel.x = new ParticleSystem.MinMaxCurve(12f, 22f);
-        vel.y = new ParticleSystem.MinMaxCurve(-0.5f, 0.5f);
-        vel.z = new ParticleSystem.MinMaxCurve(-1f, 1f);
-        var r = go.GetComponent<ParticleSystemRenderer>();
-        r.sharedMaterial = glow;
-        r.shadowCastingMode = ShadowCastingMode.Off;
-        r.receiveShadows = false;
-    }
-
-    // ---------------------------------------------------------------- helpers
 
     static float Rand(float a, float b) => a + (float)rng.NextDouble() * (b - a);
 
@@ -1031,6 +941,27 @@ public static class HackSlashBuilder
         m.SetColor("_Color", c);
         m.SetFloat("_Intensity", intensity);
         m.SetFloat("_EdgePower", 1.6f);
+        return m;
+    }
+
+    /// <summary>URP Lit with the texture-map keywords the generated materials use (normal, mask, occlusion; emission or cutout).</summary>
+    static Material CityTemplate(bool emissive, bool cutout)
+    {
+        var m = new Material(lit);
+        m.SetColor("_BaseColor", Color.white);
+        m.EnableKeyword("_NORMALMAP");
+        m.EnableKeyword("_METALLICSPECGLOSSMAP");
+        m.EnableKeyword("_OCCLUSIONMAP");
+        m.SetColor("_EmissionColor", emissive ? Color.white : Color.black);
+        if (emissive) { m.EnableKeyword("_EMISSION"); m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive; }
+        if (cutout)
+        {
+            m.SetFloat("_AlphaClip", 1f);
+            m.SetFloat("_Cutoff", 0.5f);
+            m.SetFloat("_Cull", 0f);
+            m.EnableKeyword("_ALPHATEST_ON");
+            m.renderQueue = (int)RenderQueue.AlphaTest;
+        }
         return m;
     }
 

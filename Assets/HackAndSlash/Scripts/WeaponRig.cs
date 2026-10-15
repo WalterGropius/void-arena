@@ -22,6 +22,66 @@ namespace HackAndSlash
         /// <summary>Procedural upper-body twist (yaw, degrees) and forward bend (pitch, degrees) applied in the IK pass.</summary>
         public float torsoTwist, torsoBend;
 
+        [Header("Full-body procedural layer")]
+        /// <summary>Kicks and knees: world-space foot goals (the leg IK bends to reach them).</summary>
+        public Vector3 rightFootTarget, leftFootTarget;
+        [Range(0f, 1f)] public float rightFootWeight, leftFootWeight;
+        /// <summary>Knee hints for kicks (world space).</summary>
+        public Vector3 rightKneeHint, leftKneeHint;
+        /// <summary>Hip offset in character-local metres (crouch, lunge, hop), applied to the body in the IK pass.</summary>
+        public Vector3 bodyOffset;
+        /// <summary>Whole-body lean in degrees: pitch (+ forward), roll (+ right).</summary>
+        public float bodyPitch, bodyRoll;
+        /// <summary>Keeps the animated feet planted while the body moves (crouches, landings).</summary>
+        [Range(0f, 1f)] public float plantFeet;
+        /// <summary>Off-hand aim (blaster, tether): world goal and weight.</summary>
+        public Vector3 leftHandAim;
+        [Range(0f, 1f)] public float leftHandAimWeight;
+        /// <summary>Head nod/turn offset for flinches.</summary>
+        public float headJolt;
+
+        // hit-reaction spring (pitch back/forward, twist), driven by Jolt()
+        float reactPitch, reactPitchVel, reactTwist, reactTwistVel;
+        public float ReactPitch => reactPitch;
+        public float ReactTwist => reactTwist;
+
+        /// <summary>A hit lands: the torso snaps away from the blow and springs back.</summary>
+        public void Jolt(Vector3 worldDir, float strength)
+        {
+            Vector3 local = transform.InverseTransformDirection(worldDir);
+            reactPitchVel += local.z * 900f * strength;
+            reactTwistVel += -local.x * 700f * strength;
+        }
+
+        void UpdateSprings(float dt)
+        {
+            if (dt <= 0f) return;
+            const float k = 260f, damp = 18f;
+            reactPitchVel += (-k * reactPitch - damp * reactPitchVel) * dt;
+            reactPitch += reactPitchVel * dt;
+            reactTwistVel += (-k * reactTwist - damp * reactTwistVel) * dt;
+            reactTwist += reactTwistVel * dt;
+            reactPitch = Mathf.Clamp(reactPitch, -40f, 40f);
+            reactTwist = Mathf.Clamp(reactTwist, -40f, 40f);
+        }
+
+        /// <summary>Eases every procedural layer back to neutral.</summary>
+        public void Relax(float dt, float rate = 6f)
+        {
+            float k = 1f - Mathf.Exp(-rate * dt);
+            rightFootWeight = Mathf.Lerp(rightFootWeight, 0f, k);
+            leftFootWeight = Mathf.Lerp(leftFootWeight, 0f, k);
+            bodyOffset = Vector3.Lerp(bodyOffset, Vector3.zero, k);
+            bodyPitch = Mathf.Lerp(bodyPitch, 0f, k);
+            bodyRoll = Mathf.Lerp(bodyRoll, 0f, k);
+            plantFeet = Mathf.Lerp(plantFeet, 0f, k);
+            leftHandAimWeight = Mathf.Lerp(leftHandAimWeight, 0f, k);
+            headJolt = Mathf.Lerp(headJolt, 0f, k);
+        }
+
+        /// <summary>World point in front of / beside the character, in character-local metres.</summary>
+        public Vector3 Local(float x, float y, float z) => transform.TransformPoint(x, y, z);
+
         public WeaponTrail Trail { get; private set; }
         public Vector3 GripWorld => weapon.position;
         public Vector3 BladeDirWorld => weapon.forward;
@@ -66,6 +126,7 @@ namespace HackAndSlash
 
         public void Tick(float dt)
         {
+            UpdateSprings(dt);
             if (!weapon) return;
             if (!initialized) { curPos = tgtPos; curDir = tgtDir; initialized = true; }
             float k = 1f - Mathf.Exp(-sharpness * Mathf.Max(dt, 0f));
@@ -323,6 +384,63 @@ namespace HackAndSlash
             Part(PrimitiveType.Cube, root, new Vector3(0f, 0f, 1.08f), new Vector3(0.64f, 0.1f, 0.42f), glow, default, false);
             Part(PrimitiveType.Cube, root, new Vector3(0.33f, 0f, 1.08f), new Vector3(0.06f, 0.3f, 0.3f), glow, default, false);
             Part(PrimitiveType.Cube, root, new Vector3(-0.33f, 0f, 1.08f), new Vector3(0.06f, 0.3f, 0.3f), glow, default, false);
+            return root;
+        }
+
+        /// <summary>The Enforcer's carbine: receiver, magazine, stock, a glowing scope. Muzzle is a child transform.</summary>
+        public static Transform Rifle(Transform parent, Material metal, Material glow, out Transform muzzle)
+        {
+            var root = NewRoot("Carbine", parent);
+            Plate(root, new Vector3(0f, 0.02f, 0.12f), new Vector3(0.07f, 0.11f, 0.42f), 0.02f, metal);
+            Plate(root, new Vector3(0f, -0.08f, 0.12f), new Vector3(0.045f, 0.16f, 0.07f), 0.012f, metal, new Vector3(-12f, 0f, 0f));
+            Plate(root, new Vector3(0f, -0.04f, -0.2f), new Vector3(0.05f, 0.12f, 0.24f), 0.02f, metal, new Vector3(8f, 0f, 0f));
+            Plate(root, new Vector3(0f, -0.06f, -0.02f), new Vector3(0.035f, 0.1f, 0.04f), 0.01f, metal, new Vector3(-20f, 0f, 0f));
+            Plate(root, new Vector3(0f, 0.035f, 0.52f), new Vector3(0.032f, 0.032f, 0.4f), 0.012f, metal);
+            Plate(root, new Vector3(0f, 0.1f, 0.14f), new Vector3(0.04f, 0.045f, 0.14f), 0.015f, metal);
+            Plate(root, new Vector3(0f, 0.1f, 0.215f), new Vector3(0.03f, 0.03f, 0.01f), 0.01f, glow, default, 1f, false);
+            Plate(root, new Vector3(0.038f, 0.02f, 0.18f), new Vector3(0.006f, 0.02f, 0.22f), 0.002f, glow, default, 1f, false);
+            muzzle = new GameObject("Muzzle").transform;
+            muzzle.SetParent(root, false);
+            muzzle.localPosition = new Vector3(0f, 0.035f, 0.74f);
+            return root;
+        }
+
+        /// <summary>A red laser sight that the Enforcer paints the Knight with before it fires.</summary>
+        public static LineRenderer Laser(Transform muzzle)
+        {
+            var go = new GameObject("LaserSight");
+            go.transform.SetParent(muzzle, false);
+            var lr = go.AddComponent<LineRenderer>();
+            lr.sharedMaterial = FX.FlatMat;
+            lr.shadowCastingMode = ShadowCastingMode.Off;
+            lr.receiveShadows = false;
+            lr.positionCount = 2;
+            lr.useWorldSpace = true;
+            lr.widthMultiplier = 0.012f;
+            lr.numCapVertices = 2;
+            lr.enabled = false;
+            return lr;
+        }
+
+        /// <summary>No weapon: an empty grip anchor so the hand IK still has something to drive (Auditors box).</summary>
+        public static Transform Fist(Transform parent)
+        {
+            return NewRoot("Fist", parent);
+        }
+
+        /// <summary>The Knight's sidearm (Officer Dallow's, once): a heavy revolver-style blaster with a glowing cylinder.</summary>
+        public static Transform Blaster(Transform parent, Material metal, Material glow, out Transform muzzle)
+        {
+            var root = NewRoot("Blaster", parent);
+            Plate(root, new Vector3(0f, -0.07f, -0.03f), new Vector3(0.04f, 0.13f, 0.06f), 0.015f, metal, new Vector3(-18f, 0f, 0f));
+            Plate(root, new Vector3(0f, 0.01f, 0.06f), new Vector3(0.05f, 0.07f, 0.16f), 0.018f, metal);
+            Plate(root, new Vector3(0f, 0.012f, 0.06f), new Vector3(0.062f, 0.05f, 0.07f), 0.022f, glow, default, 1f, false);
+            Plate(root, new Vector3(0f, 0.03f, 0.2f), new Vector3(0.03f, 0.03f, 0.2f), 0.012f, metal);
+            Plate(root, new Vector3(0f, -0.004f, 0.18f), new Vector3(0.022f, 0.02f, 0.16f), 0.008f, metal);
+            Plate(root, new Vector3(0f, 0.052f, 0.04f), new Vector3(0.012f, 0.012f, 0.06f), 0.004f, glow, default, 1f, false);
+            muzzle = new GameObject("Muzzle").transform;
+            muzzle.SetParent(root, false);
+            muzzle.localPosition = new Vector3(0f, 0.03f, 0.31f);
             return root;
         }
 
