@@ -32,8 +32,16 @@ Material:
     - _Exposure: 0.55
     - _Flash: 0
     - _Rotation: 200
+<<<<<<< Updated upstream
     m_Colors:
     - _HorizonColor: {r: 0.13, g: 0.075, b: 0.14, a: 1}
+=======
+    - _SolidMix: 0
+    - _Stars: 0
+    m_Colors:
+    - _HorizonColor: {r: 0.13, g: 0.075, b: 0.14, a: 1}
+    - _SolidColor: {r: 1, g: 1, b: 1, a: 1}
+>>>>>>> Stashed changes
     - _Tint: {r: 0.92, g: 0.9, b: 1, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
